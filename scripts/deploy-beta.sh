@@ -64,7 +64,6 @@ if [ "$requested_target" = "playencircle.com" ]; then
   for remote_path in $remote_paths; do
     echo "Preparing remote path: $remote_path"
     ssh $ssh_options "$remote" "mkdir -p \"$remote_path\""
-    ssh $ssh_options "$remote" "cat > \"$remote_path/.encircle-deploy-root.txt\" <<'EOF'\n$remote_path\nEOF"
   done
 else
   for remote_path in $remote_paths; do
@@ -76,7 +75,8 @@ fi
 if [ "$mode" = "--deploy" ]; then
   for remote_path in $remote_paths; do
     echo "Deploying files to: $remote_path"
-    RSYNC_RSH="ssh $ssh_options" rsync -avz --delete --exclude '.DS_Store' "$repository/public/" "$remote:$remote_path/"
+    RSYNC_RSH="ssh $ssh_options" rsync -avz --delete --exclude '.DS_Store' --exclude '.encircle-deploy-root.txt' "$repository/public/" "$remote:$remote_path/"
+    ssh $ssh_options "$remote" "printf '%s\\n' \"$remote_path\" > \"$remote_path/.encircle-deploy-root.txt\""
   done
 fi
 
