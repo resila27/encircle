@@ -23,3 +23,22 @@ The browser app is built with Vite and React. Word validation merges the existin
 ## 5×6 circle beta
 
 The experimental `beta/5x6-circles` branch deploys only to `beta.gridlockword.com` through `scripts/deploy-beta.sh`. It uses DreamHost user `dh_cwxxe8`, a dedicated SSH key, the `5x6-v2` saved-game format, and a separate `gridlock-beta.sqlite` database. The beta deployment script cannot write to the production web directory.
+
+## Zero-terminal workflow (recommended)
+
+Once this repo is set up with GitHub deploy secrets, you should be able to ship updates without running terminal commands manually:
+
+- Push changes to `beta/5x6-circles`.
+- GitHub Actions runs the build automatically.
+- On success, it deploys to all common DreamHost `playencircle.com` paths and writes the cache headers.
+
+GitHub repository secrets required for deployment:
+
+- `DREAMHOST_SSH_KEY`: private SSH deploy key
+- `DREAMHOST_HOST`: `pdx1-shared-a1-37.dreamhost.com`
+- `DREAMHOST_USER`: `dh_cwxxe8`
+
+You can still use local deploy script fallback if needed:
+
+- `./scripts/deploy-beta.sh --verify playencircle.com`
+- `./scripts/deploy-beta.sh --deploy playencircle.com`
