@@ -7,12 +7,13 @@ runtime="/Users/dki/.cache/codex-runtimes/codex-primary-runtime/dependencies"
 git_bin="$runtime/bin/fallback/git"
 node_bin="$runtime/node/bin"
 remote="dh_cwxxe8@pdx1-shared-a1-37.dreamhost.com"
-remote_path="beta.gridlockword.com"
+remote_path="${2:-beta.gridlockword.com}"
 key="$credentials/beta-dreamhost-deploy-key"
 known_hosts="$credentials/known-hosts"
 
 usage() {
-  echo "Usage: $0 --verify | --deploy" >&2
+  echo "Usage: $0 --verify [target-domain] | --deploy [target-domain]" >&2
+  echo "  target-domain defaults to beta.gridlockword.com if omitted." >&2
   exit 2
 }
 
@@ -44,10 +45,10 @@ PATH="$node_bin:$PATH" node scripts/build-server.mjs
 test -z "$("$git_bin" status --porcelain)"
 
 ssh_options="-o IdentitiesOnly=yes -o BatchMode=yes -o StrictHostKeyChecking=yes -o UserKnownHostsFile=$known_hosts -i $key"
-ssh $ssh_options "$remote" "test -d $remote_path && test -f gridlock-config.php && test -f gridlock-beta.sqlite"
+ssh $ssh_options "$remote" "test -d $remote_path && test -f $remote_path/gridlock-config.php && test -f $remote_path/gridlock-beta.sqlite"
 
 if [ "$mode" = "--deploy" ]; then
   RSYNC_RSH="ssh $ssh_options" rsync -avz --delete --exclude '.DS_Store' "$repository/public/" "$remote:$remote_path/"
 fi
 
-echo "ENCIRCLE beta $mode succeeded at commit $head_sha"
+echo "ENCIRCLE beta $mode succeeded for $remote_path at commit $head_sha"
