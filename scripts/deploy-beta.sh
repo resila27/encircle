@@ -8,13 +8,12 @@ git_bin="$runtime/bin/fallback/git"
 node_bin="$runtime/node/bin"
 remote="dh_cwxxe8@pdx1-shared-a1-37.dreamhost.com"
 requested_target="${2:-beta.gridlockword.com}"
-remote_paths=" $requested_target"
-playencircle_public="domains/playencircle.com/public"
-playencircle_alt="playencircle.com/public"
+remote_paths="$requested_target"
+playencircle_deploy_targets="domains/playencircle.com/public playencircle.com/public domains/playencircle.com/public_html playencircle.com/public_html playencircle.com"
 
 case "$requested_target" in
   playencircle.com)
-    remote_paths="$playencircle_public $playencircle_alt"
+    remote_paths="$playencircle_deploy_targets"
     ;;
   *)
     remote_paths="$requested_target"
@@ -26,7 +25,7 @@ known_hosts="$credentials/known-hosts"
 usage() {
   echo "Usage: $0 --verify [target-domain] | --deploy [target-domain]" >&2
   echo "  target-domain defaults to beta.gridlockword.com if omitted." >&2
-  echo "  Supported custom target examples: playencircle.com (deployed to domains/playencircle.com/public)." >&2
+  echo "  Supported custom target examples: playencircle.com (deployed to several common DreamHost paths)." >&2
   exit 2
 }
 
