@@ -8,12 +8,16 @@ git_bin="$runtime/bin/fallback/git"
 node_bin="$runtime/node/bin"
 remote="dh_cwxxe8@pdx1-shared-a1-37.dreamhost.com"
 requested_target="${2:-beta.gridlockword.com}"
-remote_path="$requested_target"
-web_root="public"
+remote_paths=" $requested_target"
+playencircle_public="domains/playencircle.com/public"
+playencircle_alt="playencircle.com/public"
 
 case "$requested_target" in
   playencircle.com)
-    remote_path="domains/playencircle.com/$web_root"
+    remote_paths="$playencircle_public $playencircle_alt"
+    ;;
+  *)
+    remote_paths="$requested_target"
     ;;
 esac
 key="$credentials/beta-dreamhost-deploy-key"
@@ -55,13 +59,19 @@ test -z "$("$git_bin" status --porcelain)"
 
 ssh_options="-o IdentitiesOnly=yes -o BatchMode=yes -o StrictHostKeyChecking=yes -o UserKnownHostsFile=$known_hosts -i $key"
 if [ "$requested_target" = "playencircle.com" ]; then
-  ssh $ssh_options "$remote" "mkdir -p \"$remote_path\""
+  for remote_path in $remote_paths; do
+    ssh $ssh_options "$remote" "mkdir -p \"$remote_path\""
+  done
 else
-  ssh $ssh_options "$remote" "test -d $remote_path && test -f $remote_path/gridlock-config.php && test -f $remote_path/gridlock-beta.sqlite"
+  for remote_path in $remote_paths; do
+    ssh $ssh_options "$remote" "test -d $remote_path && test -f $remote_path/gridlock-config.php && test -f $remote_path/gridlock-beta.sqlite" && break
+  done
 fi
 
 if [ "$mode" = "--deploy" ]; then
-  RSYNC_RSH="ssh $ssh_options" rsync -avz --delete --exclude '.DS_Store' "$repository/public/" "$remote:$remote_path/"
+  for remote_path in $remote_paths; do
+    RSYNC_RSH="ssh $ssh_options" rsync -avz --delete --exclude '.DS_Store' "$repository/public/" "$remote:$remote_path/"
+  done
 fi
 
 echo "ENCIRCLE beta $mode succeeded for $remote_path at commit $head_sha"
