@@ -45,7 +45,11 @@ PATH="$node_bin:$PATH" node scripts/build-server.mjs
 test -z "$("$git_bin" status --porcelain)"
 
 ssh_options="-o IdentitiesOnly=yes -o BatchMode=yes -o StrictHostKeyChecking=yes -o UserKnownHostsFile=$known_hosts -i $key"
-ssh $ssh_options "$remote" "test -d $remote_path && test -f $remote_path/gridlock-config.php && test -f $remote_path/gridlock-beta.sqlite"
+if [ "$remote_path" = "playencircle.com" ]; then
+  ssh $ssh_options "$remote" "mkdir -p \"$remote_path\" \"$remote_path/public\""
+else
+  ssh $ssh_options "$remote" "test -d $remote_path && test -f $remote_path/gridlock-config.php && test -f $remote_path/gridlock-beta.sqlite"
+fi
 
 if [ "$mode" = "--deploy" ]; then
   RSYNC_RSH="ssh $ssh_options" rsync -avz --delete --exclude '.DS_Store' "$repository/public/" "$remote:$remote_path/"
