@@ -64,6 +64,7 @@ if [ "$requested_target" = "playencircle.com" ]; then
   for remote_path in $remote_paths; do
     echo "Preparing remote path: $remote_path"
     ssh $ssh_options "$remote" "mkdir -p \"$remote_path\""
+    ssh $ssh_options "$remote" "cat > \"$remote_path/.encircle-deploy-root.txt\" <<'EOF'\n$remote_path\nEOF"
   done
 else
   for remote_path in $remote_paths; do
