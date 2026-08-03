@@ -7,13 +7,22 @@ runtime="/Users/dki/.cache/codex-runtimes/codex-primary-runtime/dependencies"
 git_bin="$runtime/bin/fallback/git"
 node_bin="$runtime/node/bin"
 remote="dh_cwxxe8@pdx1-shared-a1-37.dreamhost.com"
-remote_path="${2:-beta.gridlockword.com}"
+requested_target="${2:-beta.gridlockword.com}"
+remote_path="$requested_target"
+web_root="public"
+
+case "$requested_target" in
+  playencircle.com)
+    remote_path="domains/playencircle.com/$web_root"
+    ;;
+esac
 key="$credentials/beta-dreamhost-deploy-key"
 known_hosts="$credentials/known-hosts"
 
 usage() {
   echo "Usage: $0 --verify [target-domain] | --deploy [target-domain]" >&2
   echo "  target-domain defaults to beta.gridlockword.com if omitted." >&2
+  echo "  Supported custom target examples: playencircle.com (deployed to domains/playencircle.com/public)." >&2
   exit 2
 }
 
@@ -45,8 +54,8 @@ PATH="$node_bin:$PATH" node scripts/build-server.mjs
 test -z "$("$git_bin" status --porcelain)"
 
 ssh_options="-o IdentitiesOnly=yes -o BatchMode=yes -o StrictHostKeyChecking=yes -o UserKnownHostsFile=$known_hosts -i $key"
-if [ "$remote_path" = "playencircle.com" ]; then
-  ssh $ssh_options "$remote" "mkdir -p \"$remote_path\" \"$remote_path/public\""
+if [ "$requested_target" = "playencircle.com" ]; then
+  ssh $ssh_options "$remote" "mkdir -p \"$remote_path\""
 else
   ssh $ssh_options "$remote" "test -d $remote_path && test -f $remote_path/gridlock-config.php && test -f $remote_path/gridlock-beta.sqlite"
 fi
