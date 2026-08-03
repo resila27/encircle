@@ -35,6 +35,9 @@ case "$mode" in
   *) usage ;;
 esac
 
+echo "ENCIRCLE deploy script: mode=$mode target=$requested_target"
+echo "ENCIRCLE deploy script: repository=$repository"
+
 test -e "$repository/.git"
 test -f "$key"
 test -f "$known_hosts"
@@ -59,16 +62,19 @@ test -z "$("$git_bin" status --porcelain)"
 ssh_options="-o IdentitiesOnly=yes -o BatchMode=yes -o StrictHostKeyChecking=yes -o UserKnownHostsFile=$known_hosts -i $key"
 if [ "$requested_target" = "playencircle.com" ]; then
   for remote_path in $remote_paths; do
+    echo "Preparing remote path: $remote_path"
     ssh $ssh_options "$remote" "mkdir -p \"$remote_path\""
   done
 else
   for remote_path in $remote_paths; do
+    echo "Checking remote path: $remote_path"
     ssh $ssh_options "$remote" "test -d $remote_path && test -f $remote_path/gridlock-config.php && test -f $remote_path/gridlock-beta.sqlite" && break
   done
 fi
 
 if [ "$mode" = "--deploy" ]; then
   for remote_path in $remote_paths; do
+    echo "Deploying files to: $remote_path"
     RSYNC_RSH="ssh $ssh_options" rsync -avz --delete --exclude '.DS_Store' "$repository/public/" "$remote:$remote_path/"
   done
 fi
