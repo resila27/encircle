@@ -9,7 +9,7 @@ node_bin="$runtime/node/bin"
 remote="dh_cwxxe8@pdx1-shared-a1-37.dreamhost.com"
 requested_target="${2:-beta.gridlockword.com}"
 remote_paths="$requested_target"
-playencircle_deploy_targets="domains/playencircle.com/public playencircle.com/public domains/playencircle.com/public_html playencircle.com/public_html playencircle.com"
+playencircle_deploy_targets="domains/playencircle.com domains/playencircle.com/public domains/playencircle.com/public_html playencircle.com playencircle.com/public playencircle.com/public_html public_html/playencircle.com public_html/playencircle.com/public"
 
 case "$requested_target" in
   playencircle.com)
