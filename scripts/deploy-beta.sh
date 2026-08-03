@@ -21,6 +21,27 @@ case "$requested_target" in
 esac
 key="$credentials/beta-dreamhost-deploy-key"
 known_hosts="$credentials/known-hosts"
+cache_control_file="$(mktemp)"
+cleanup() {
+  rm -f "$cache_control_file"
+}
+trap cleanup EXIT
+
+cat > "$cache_control_file" <<'EOF'
+<IfModule mod_headers.c>
+	# Prevent browsers/CDN from caching the root HTML so new deployments appear immediately.
+	<Files "index.html">
+		Header set Cache-Control "no-store, no-cache, must-revalidate, max-age=0"
+		Header set Pragma "no-cache"
+		Header set Expires "Thu, 01 Jan 1970 00:00:00 GMT"
+	</Files>
+
+	# Keep static assets cached aggressively; they already include fingerprinted filenames.
+	<FilesMatch "\\.(js|css|png|jpg|jpeg|gif|svg|webp|ico|woff2?|ttf|otf|woff|eot)$">
+		Header set Cache-Control "public, max-age=31536000, immutable"
+	</FilesMatch>
+</IfModule>
+EOF
 
 usage() {
   echo "Usage: $0 --verify [target-domain] | --deploy [target-domain]" >&2
@@ -76,6 +97,7 @@ if [ "$mode" = "--deploy" ]; then
   for remote_path in $remote_paths; do
     echo "Deploying files to: $remote_path"
     RSYNC_RSH="ssh $ssh_options" rsync -avz --delete --exclude '.DS_Store' --exclude '.encircle-deploy-root.txt' "$repository/public/" "$remote:$remote_path/"
+    RSYNC_RSH="ssh $ssh_options" rsync -avz --delete "$cache_control_file" "$remote:$remote_path/.htaccess"
     ssh $ssh_options "$remote" "printf '%s\\n' \"$remote_path\" > \"$remote_path/encircle-deploy-root.txt\""
   done
 fi
