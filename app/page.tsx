@@ -1,6 +1,6 @@
 "use client";
 
-import { useCallback, useEffect, useMemo, useRef, useState, type CSSProperties, type PointerEvent as ReactPointerEvent } from "react";
+import { useCallback, useEffect, useMemo, useRef, useState, type CSSProperties, type KeyboardEvent as ReactKeyboardEvent, type PointerEvent as ReactPointerEvent } from "react";
 import { AccountModal } from "./AccountModal";
 import { COMPOUND_WORDS, EXTENDED_WORDS, STRATEGY_WORDS } from "./strategy-words";
 import {
@@ -22,7 +22,7 @@ export const BOARD_ROWS = 5;
 export const BOARD_COLUMNS = 6;
 export const BOARD_SIZE = BOARD_ROWS * BOARD_COLUMNS;
 export const BOARD_VERSION = "circular-30-v1";
-export const BOARD_RING_COUNTS = [1, 5, 9, 15] as const;
+export const BOARD_RING_COUNTS = [1, 6, 10, 13] as const;
 const WIN_MESSAGE_HOLD_MS = 2800;
 
 const BASE_LETTERS = "STARECLOUDPINGMBEACHFORYTENASR".split("");
@@ -64,42 +64,67 @@ const CLIENT_SUPPLEMENTAL_WORDS = new Set([
   "salesman", "salesmen", "saleswoman", "saleswomen", "salesperson", "salespeople",
 ]);
 
-type CircularTileLayout = { ring: number; size: number; x: number; y: number };
+export type SectorLayout = { ring: number; rIn: number; rOut: number; a0: number; a1: number };
 
-function circularBoardLayout(): CircularTileLayout[] {
-  const baseRadius = 4.17;
-  const ringRadii = [0, 10.12, 24.44, 41.4];
-  const tileRadii = [baseRadius, baseRadius * 1.427, baseRadius * 2.004, baseRadius * 2.062];
-  const insetScale = .94;
+const BOARD_CENTER = 50;
+const BOARD_INNER_RADIUS = 6.5;
+const BOARD_OUTER_RADIUS = 46;
 
+function circularBoardLayout(): SectorLayout[] {
+  const ringWidth = (BOARD_OUTER_RADIUS - BOARD_INNER_RADIUS) / (BOARD_RING_COUNTS.length - 1);
   return BOARD_RING_COUNTS.flatMap((count, ring) => {
-    if (ring === 0) return [{ ring, size: tileRadii[ring] * 2 * insetScale, x: 50, y: 50 }];
-    const offset = -Math.PI / 2 + (ring % 2 === 0 ? Math.PI / count : 0);
-    return Array.from({ length: count }, (_, position) => {
-      const angle = offset + position * Math.PI * 2 / count;
-      const radius = ringRadii[ring] * insetScale;
-      return {
-        ring,
-        size: tileRadii[ring] * 2 * insetScale,
-        x: 50 + Math.cos(angle) * radius,
-        y: 50 + Math.sin(angle) * radius,
-      };
-    });
+    if (ring === 0) return [{ ring, rIn: 0, rOut: BOARD_INNER_RADIUS, a0: 0, a1: 360 }];
+    const rIn = BOARD_INNER_RADIUS + (ring - 1) * ringWidth;
+    const rOut = BOARD_INNER_RADIUS + ring * ringWidth;
+    const step = 360 / count;
+    return Array.from({ length: count }, (_, position) => ({
+      ring, rIn, rOut, a0: position * step, a1: (position + 1) * step,
+    }));
   });
+}
+
+export function polarPoint(radius: number, angleDeg: number): [number, number] {
+  const rad = (angleDeg - 90) * Math.PI / 180;
+  return [BOARD_CENTER + radius * Math.cos(rad), BOARD_CENTER + radius * Math.sin(rad)];
+}
+
+export function sectorPath(rIn: number, rOut: number, a0: number, a1: number) {
+  const [x1, y1] = polarPoint(rOut, a0);
+  const [x2, y2] = polarPoint(rOut, a1);
+  const [x3, y3] = polarPoint(rIn, a1);
+  const [x4, y4] = polarPoint(rIn, a0);
+  const large = a1 - a0 > 180 ? 1 : 0;
+  return `M ${x1} ${y1} A ${rOut} ${rOut} 0 ${large} 1 ${x2} ${y2} L ${x3} ${y3} A ${rIn} ${rIn} 0 ${large} 0 ${x4} ${y4} Z`;
 }
 
 export const BOARD_LAYOUT = circularBoardLayout();
 const OUTER_TILES = BOARD_LAYOUT.map((tile, index) => tile.ring === BOARD_RING_COUNTS.length - 1 ? index : -1).filter(index => index >= 0);
-const RING_ANCHORS = OUTER_TILES.filter((_, position) => position % 3 === 0);
 const CENTER_TILES = [0];
 
-const TILE_NEIGHBORS = BOARD_LAYOUT.map((tile, index) => BOARD_LAYOUT
-  .map((candidate, candidateIndex) => {
-    if (candidateIndex === index) return -1;
-    const distance = Math.hypot(tile.x - candidate.x, tile.y - candidate.y);
-    return distance <= (tile.size + candidate.size) * .57 ? candidateIndex : -1;
-  })
-  .filter(candidateIndex => candidateIndex >= 0));
+function computeTileNeighbors(layout: SectorLayout[]): number[][] {
+  const neighborSets = layout.map(() => new Set<number>());
+  const link = (a: number, b: number) => { neighborSets[a].add(b); neighborSets[b].add(a); };
+  const byRing = new Map<number, number[]>();
+  layout.forEach((tile, index) => byRing.set(tile.ring, [...(byRing.get(tile.ring) ?? []), index]));
+
+  byRing.forEach((indices, ring) => {
+    if (ring === 0) return;
+    indices.forEach((index, position) => link(index, indices[(position + 1) % indices.length]));
+  });
+  const centerIndex = byRing.get(0)?.[0];
+  if (centerIndex !== undefined) (byRing.get(1) ?? []).forEach(index => link(centerIndex, index));
+  for (let ring = 1; ring < BOARD_RING_COUNTS.length - 1; ring++) {
+    (byRing.get(ring) ?? []).forEach(innerIndex => (byRing.get(ring + 1) ?? []).forEach(outerIndex => {
+      const inner = layout[innerIndex], outer = layout[outerIndex];
+      if (inner.a0 < outer.a1 && outer.a0 < inner.a1) link(innerIndex, outerIndex);
+    }));
+  }
+  return neighborSets.map(set => [...set]);
+}
+
+const TILE_NEIGHBORS = computeTileNeighbors(BOARD_LAYOUT);
+const OUTER_MIN_NEIGHBORS = Math.min(...OUTER_TILES.map(index => TILE_NEIGHBORS[index].length));
+const RING_ANCHORS = OUTER_TILES.filter(index => TILE_NEIGHBORS[index].length === OUTER_MIN_NEIGHBORS);
 
 function shuffledLetters() {
   const a = [...BASE_LETTERS];
@@ -435,7 +460,7 @@ const LABELS: Record<Difficulty, { name: string; note: string; face: string }> =
 const TUTORIAL_SLIDES = [
   {
     kind: "claim", eyebrow: "The basic move", title: "Make words. Take ground.",
-    body: "Choose circles anywhere on the 5×6 board, then submit your word. Every circle you use becomes yours, so useful words are also territory moves.",
+    body: "Choose circles anywhere on the 30-circle board, then submit your word. Every circle you use becomes yours, so useful words are also territory moves.",
   },
   {
     kind: "defend", eyebrow: "Think one turn ahead", title: "Protect yours. Break theirs.",
@@ -446,8 +471,8 @@ const TUTORIAL_SLIDES = [
     body: "ENCIRCLE is a zero-sum fight for 30 circles. Use a rival’s letter and its circle changes sides: you gain one while they lose one, making a steal twice as valuable as claiming empty space.",
   },
   {
-    kind: "corner", eyebrow: "Build a stronghold", title: "Start at an edge. Own a corner.",
-    body: "Corners have fewer neighboring circles to secure. Capture one early, protect the circles around it, then grow your connected territory toward the center.",
+    kind: "corner", eyebrow: "Build a stronghold", title: "Start on the outer ring.",
+    body: "Circles on the outer ring have fewer neighbors to secure. Capture one early, protect the circles around it, then grow your connected territory toward the center.",
   },
   {
     kind: "words", eyebrow: "Make language work harder", title: "Stretch the word.",
@@ -923,7 +948,7 @@ export default function Home() {
           {[..."STARECLOUDPINGMBEACHFORYTENASR"].map((letter, i) => <span key={i}>{letter}</span>)}
         </div>
         <p className="eyebrow">A battle of words</p>
-        <p className="beta-label">5×6 circle beta</p>
+        <p className="beta-label">Circular board beta</p>
         <h1>ENCIRCLE</h1>
         <p className="lede">Find words. Claim circles.<br/>Surround letters to make them yours for good.</p>
       </section>
@@ -1046,25 +1071,37 @@ export default function Home() {
           <div className="word-tray" aria-live="polite"><span>{message}</span></div>
         )}
         <div className="board circular-board" role="grid" aria-label="Circular letter board">
-          {letters.map((letter, i) => {
-            const owner = owners[i];
-            const isSelected = selected.includes(i);
-            const layout = BOARD_LAYOUT[i];
-            return <span
-              aria-hidden="false"
-              className={`tile-slot ring-${layout.ring}`}
-              key={i}
-              style={{ height: `${layout.size}%`, left: `${layout.x}%`, top: `${layout.y}%`, width: `${layout.size}%` }}
-            ><button
-                role="gridcell"
-                aria-label={`${letter}${owner === 1 ? ", yours" : owner === 2 ? ", rival’s" : ""}${locked[i] ? ", locked" : ""}`}
-                aria-pressed={isSelected}
-                disabled={turn !== "you"}
-                className={`tile owner-${owner} ${locked[i] ? "locked" : ""} ${isSelected ? "vacated" : ""} ${claimEffect.tiles.includes(i) ? "just-claimed" : ""} ${claimEffect.stolen.includes(i) ? "just-stolen" : ""} ${claimEffect.locked.includes(i) ? "just-locked" : ""}`}
-                style={{ "--claim-delay": `${Math.max(0, claimEffect.tiles.indexOf(i)) * 70}ms` } as CSSProperties}
-                onClick={() => { setSelected(s => s.includes(i) ? s.filter(x => x !== i) : [...s, i]); setWordError(""); }}
-              >{letter}{locked[i] && <i>🔑</i>}</button></span>;
-          })}
+          <svg className="circular-board-svg" viewBox="0 0 100 100">
+            {letters.map((letter, i) => {
+              const owner = owners[i];
+              const isSelected = selected.includes(i);
+              const disabled = turn !== "you";
+              const layout = BOARD_LAYOUT[i];
+              const [tx, ty] = polarPoint(layout.ring === 0 ? 0 : (layout.rIn + layout.rOut) / 2, (layout.a0 + layout.a1) / 2);
+              const tileClass = `tile owner-${owner} ${layout.ring === 0 ? "ring-0" : ""} ${locked[i] ? "locked" : ""} ${isSelected ? "vacated" : ""} ${claimEffect.tiles.includes(i) ? "just-claimed" : ""} ${claimEffect.stolen.includes(i) ? "just-stolen" : ""} ${claimEffect.locked.includes(i) ? "just-locked" : ""}`;
+              const activate = () => { if (disabled) return; setSelected(s => s.includes(i) ? s.filter(x => x !== i) : [...s, i]); setWordError(""); };
+              const shapeProps = {
+                role: "gridcell" as const,
+                tabIndex: disabled ? -1 : 0,
+                "aria-disabled": disabled,
+                "aria-label": `${letter}${owner === 1 ? ", yours" : owner === 2 ? ", rival’s" : ""}${locked[i] ? ", locked" : ""}`,
+                "aria-pressed": isSelected,
+                className: "tile-shape",
+                style: { "--claim-delay": `${Math.max(0, claimEffect.tiles.indexOf(i)) * 70}ms` } as CSSProperties,
+                onClick: activate,
+                onKeyDown: (event: ReactKeyboardEvent) => { if (event.key === "Enter" || event.key === " ") { event.preventDefault(); activate(); } },
+              };
+              return (
+                <g className={tileClass} key={i}>
+                  {layout.ring === 0
+                    ? <circle cx={50} cy={50} r={layout.rOut} {...shapeProps} />
+                    : <path d={sectorPath(layout.rIn, layout.rOut, layout.a0, layout.a1)} {...shapeProps} />}
+                  <text className="tile-letter" dy="0.32em" textAnchor="middle" x={tx} y={ty}>{letter}</text>
+                  {locked[i] && <text className="tile-lock" dy="0.32em" textAnchor="middle" x={tx} y={ty - (layout.ring === 0 ? layout.rOut : layout.rOut - layout.rIn) * .42}>🔑</text>}
+                </g>
+              );
+            })}
+          </svg>
         </div>
       </section>
 

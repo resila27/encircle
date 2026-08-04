@@ -42,3 +42,6 @@ next-env.d.ts
 /.wrangler/
 /outputs/
 /work/
+
+# local-only backups (not part of the project, never pushed)
+/_backups/
