@@ -21,7 +21,8 @@ import {
 export const BOARD_ROWS = 5;
 export const BOARD_COLUMNS = 6;
 export const BOARD_SIZE = BOARD_ROWS * BOARD_COLUMNS;
-export const BOARD_VERSION = "5x6-v2";
+export const BOARD_VERSION = "circular-30-v1";
+export const BOARD_RING_COUNTS = [1, 5, 9, 15] as const;
 const WIN_MESSAGE_HOLD_MS = 2800;
 
 const BASE_LETTERS = "STARECLOUDPINGMBEACHFORYTENASR".split("");
@@ -63,12 +64,42 @@ const CLIENT_SUPPLEMENTAL_WORDS = new Set([
   "salesman", "salesmen", "saleswoman", "saleswomen", "salesperson", "salespeople",
 ]);
 
-const ORTHO = [[-1,-1],[-1,0],[-1,1],[0,-1],[0,1],[1,-1],[1,0],[1,1]];
-const CORNERS = [0, BOARD_COLUMNS - 1, BOARD_SIZE - BOARD_COLUMNS, BOARD_SIZE - 1];
-const CENTER_TILES = [
-  Math.floor(BOARD_ROWS / 2) * BOARD_COLUMNS + Math.floor((BOARD_COLUMNS - 1) / 2),
-  Math.floor(BOARD_ROWS / 2) * BOARD_COLUMNS + Math.ceil((BOARD_COLUMNS - 1) / 2),
-];
+type CircularTileLayout = { ring: number; size: number; x: number; y: number };
+
+function circularBoardLayout(): CircularTileLayout[] {
+  const baseRadius = 4.17;
+  const ringRadii = [0, 10.12, 24.44, 41.4];
+  const tileRadii = [baseRadius, baseRadius * 1.427, baseRadius * 2.004, baseRadius * 2.062];
+  const insetScale = .94;
+
+  return BOARD_RING_COUNTS.flatMap((count, ring) => {
+    if (ring === 0) return [{ ring, size: tileRadii[ring] * 2 * insetScale, x: 50, y: 50 }];
+    const offset = -Math.PI / 2 + (ring % 2 === 0 ? Math.PI / count : 0);
+    return Array.from({ length: count }, (_, position) => {
+      const angle = offset + position * Math.PI * 2 / count;
+      const radius = ringRadii[ring] * insetScale;
+      return {
+        ring,
+        size: tileRadii[ring] * 2 * insetScale,
+        x: 50 + Math.cos(angle) * radius,
+        y: 50 + Math.sin(angle) * radius,
+      };
+    });
+  });
+}
+
+export const BOARD_LAYOUT = circularBoardLayout();
+const OUTER_TILES = BOARD_LAYOUT.map((tile, index) => tile.ring === BOARD_RING_COUNTS.length - 1 ? index : -1).filter(index => index >= 0);
+const RING_ANCHORS = OUTER_TILES.filter((_, position) => position % 3 === 0);
+const CENTER_TILES = [0];
+
+const TILE_NEIGHBORS = BOARD_LAYOUT.map((tile, index) => BOARD_LAYOUT
+  .map((candidate, candidateIndex) => {
+    if (candidateIndex === index) return -1;
+    const distance = Math.hypot(tile.x - candidate.x, tile.y - candidate.y);
+    return distance <= (tile.size + candidate.size) * .57 ? candidateIndex : -1;
+  })
+  .filter(candidateIndex => candidateIndex >= 0));
 
 function shuffledLetters() {
   const a = [...BASE_LETTERS];
@@ -143,10 +174,7 @@ function seededLetters(seed: string) {
 }
 
 export function neighbors(index: number) {
-  const row = Math.floor(index / BOARD_COLUMNS), col = index % BOARD_COLUMNS;
-  return ORTHO.map(([dr, dc]) => [row + dr, col + dc])
-    .filter(([r, c]) => r >= 0 && r < BOARD_ROWS && c >= 0 && c < BOARD_COLUMNS)
-    .map(([r, c]) => r * BOARD_COLUMNS + c);
+  return TILE_NEIGHBORS[index] ?? [];
 }
 
 function protectedTiles(owners: Owner[]) {
@@ -162,13 +190,30 @@ export function claimTiles(tileIds: number[], owner: 1 | 2, source: Owner[]) {
   return next;
 }
 
-function manhattan(left: number, right: number) {
-  return Math.abs(Math.floor(left / BOARD_COLUMNS) - Math.floor(right / BOARD_COLUMNS))
-    + Math.abs(left % BOARD_COLUMNS - right % BOARD_COLUMNS);
+function boardDistance(left: number, right: number) {
+  if (left === right) return 0;
+  const visited = new Set([left]);
+  let frontier = [left];
+  let distance = 0;
+  while (frontier.length) {
+    distance++;
+    const next: number[] = [];
+    for (const tile of frontier) {
+      for (const neighbor of neighbors(tile)) {
+        if (neighbor === right) return distance;
+        if (!visited.has(neighbor)) {
+          visited.add(neighbor);
+          next.push(neighbor);
+        }
+      }
+    }
+    frontier = next;
+  }
+  return BOARD_RING_COUNTS.length * 2;
 }
 
 function distanceToCenter(index: number) {
-  return Math.min(...CENTER_TILES.map(center => manhattan(index, center)));
+  return Math.min(...CENTER_TILES.map(center => boardDistance(index, center)));
 }
 
 function largestTerritory(owners: Owner[], owner: 1 | 2) {
@@ -196,7 +241,7 @@ function territoryValue(owners: Owner[], owner: 1 | 2) {
   const locked = protectedTiles(owners);
   const owned = owners.map((value, i) => value === owner ? i : -1).filter(i => i >= 0);
   const phase = Math.min(1, owned.length / 13);
-  const anchor = CORNERS.filter(i => owners[i] === owner)
+  const anchor = RING_ANCHORS.filter(i => owners[i] === owner)
     .sort((a, b) => distanceToCenter(a) - distanceToCenter(b))[0];
   let score = owned.length * 2.6 + largestTerritory(owners, owner) * 2.8;
 
@@ -208,9 +253,9 @@ function territoryValue(owners: Owner[], owner: 1 | 2) {
     if (locked[i]) score += 18;
     else if (friends === adjacent.length - 1) score += 8;
     else if (friends >= Math.ceil(adjacent.length * .6)) score += 3.5;
-    if (CORNERS.includes(i)) score += 11 - phase * 5;
-    else if (Math.floor(i / BOARD_COLUMNS) === 0 || Math.floor(i / BOARD_COLUMNS) === BOARD_ROWS - 1 || i % BOARD_COLUMNS === 0 || i % BOARD_COLUMNS === BOARD_COLUMNS - 1) score += 2.2;
-    if (anchor !== undefined) score += Math.max(0, 6 - manhattan(anchor, i)) * (1.5 - phase * .6);
+    if (RING_ANCHORS.includes(i)) score += 11 - phase * 5;
+    else if (OUTER_TILES.includes(i)) score += 2.2;
+    if (anchor !== undefined) score += Math.max(0, 6 - boardDistance(anchor, i)) * (1.5 - phase * .6);
     score += Math.max(0, 4 - distanceToCenter(i)) * phase * 1.8;
   });
 
@@ -231,7 +276,7 @@ export function boardAdvantage(owners: Owner[], owner: 1 | 2) {
 function cornerPressure(owners: Owner[], owner: 1 | 2) {
   const opponent = owner === 1 ? 2 : 1;
   const locked = protectedTiles(owners);
-  return CORNERS.reduce((score, corner) => {
+  return RING_ANCHORS.reduce((score, corner) => {
     const adjacent = neighbors(corner);
     const friends = adjacent.filter(i => owners[i] === owner).length;
     const enemies = adjacent.filter(i => owners[i] === opponent).length;
@@ -820,8 +865,13 @@ export default function Home() {
   };
 
   const shareResult = async () => {
-    const circles = Array.from({ length: BOARD_ROWS }, (_, row) => owners.slice(row * BOARD_COLUMNS, row * BOARD_COLUMNS + BOARD_COLUMNS)
-      .map(owner => owner === 1 ? "🟢" : owner === 2 ? "🟡" : "⚪").join("")).join("\n");
+    let ringOffset = 0;
+    const circles = BOARD_RING_COUNTS.map(count => {
+      const ring = owners.slice(ringOffset, ringOffset + count)
+        .map(owner => owner === 1 ? "🟢" : owner === 2 ? "🟡" : "⚪").join("");
+      ringOffset += count;
+      return ring;
+    }).join("\n");
     const heading = mode === "daily" && dailyDate ? `ENCIRCLE Daily ${dailyDate}` : `ENCIRCLE vs ${LABELS[difficulty].name}`;
     const text = `${heading}\n${yourScore}–${rivalScore} ${result === "win" ? "Win" : result === "loss" ? "Loss" : "Tie"}\n${circles}\n${longestWord ? `Best word: ${longestWord.toUpperCase()}\n` : ""}https://beta.gridlockword.com`;
     const canShare = typeof navigator.share === "function";
@@ -995,20 +1045,25 @@ export default function Home() {
         ) : (
           <div className="word-tray" aria-live="polite"><span>{message}</span></div>
         )}
-        <div className="board" role="grid" aria-label="Letter board">
+        <div className="board circular-board" role="grid" aria-label="Circular letter board">
           {letters.map((letter, i) => {
             const owner = owners[i];
             const isSelected = selected.includes(i);
-            return <button
-              role="gridcell"
-              aria-label={`${letter}${owner === 1 ? ", yours" : owner === 2 ? ", rival’s" : ""}${locked[i] ? ", locked" : ""}`}
-              aria-pressed={isSelected}
-              disabled={turn !== "you"}
-              className={`tile owner-${owner} ${locked[i] ? "locked" : ""} ${isSelected ? "vacated" : ""} ${claimEffect.tiles.includes(i) ? "just-claimed" : ""} ${claimEffect.stolen.includes(i) ? "just-stolen" : ""} ${claimEffect.locked.includes(i) ? "just-locked" : ""}`}
+            const layout = BOARD_LAYOUT[i];
+            return <span
+              aria-hidden="false"
+              className={`tile-slot ring-${layout.ring}`}
               key={i}
-              style={{ "--claim-delay": `${Math.max(0, claimEffect.tiles.indexOf(i)) * 70}ms` } as CSSProperties}
-              onClick={() => { setSelected(s => s.includes(i) ? s.filter(x => x !== i) : [...s, i]); setWordError(""); }}
-            >{letter}{locked[i] && <i>🔑</i>}</button>;
+              style={{ height: `${layout.size}%`, left: `${layout.x}%`, top: `${layout.y}%`, width: `${layout.size}%` }}
+            ><button
+                role="gridcell"
+                aria-label={`${letter}${owner === 1 ? ", yours" : owner === 2 ? ", rival’s" : ""}${locked[i] ? ", locked" : ""}`}
+                aria-pressed={isSelected}
+                disabled={turn !== "you"}
+                className={`tile owner-${owner} ${locked[i] ? "locked" : ""} ${isSelected ? "vacated" : ""} ${claimEffect.tiles.includes(i) ? "just-claimed" : ""} ${claimEffect.stolen.includes(i) ? "just-stolen" : ""} ${claimEffect.locked.includes(i) ? "just-locked" : ""}`}
+                style={{ "--claim-delay": `${Math.max(0, claimEffect.tiles.indexOf(i)) * 70}ms` } as CSSProperties}
+                onClick={() => { setSelected(s => s.includes(i) ? s.filter(x => x !== i) : [...s, i]); setWordError(""); }}
+              >{letter}{locked[i] && <i>🔑</i>}</button></span>;
           })}
         </div>
       </section>

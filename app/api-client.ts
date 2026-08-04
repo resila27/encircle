@@ -5,7 +5,7 @@ export type GameMode = "classic" | "daily";
 
 export type SavedGame = {
   gameId: string;
-  boardVersion: "5x6-v2";
+  boardVersion: "circular-30-v1";
   difficulty: Difficulty;
   letters: string[];
   owners: Owner[];

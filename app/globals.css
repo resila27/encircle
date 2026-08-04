@@ -45,6 +45,14 @@ h1 { margin:0; font-family:Georgia,serif; font-size:clamp(55px,16vw,78px); line-
 .tile.just-stolen { animation-name:steal-pop; }
 .tile.just-locked { animation-name:lock-pop; }
 .tile.just-stolen.just-locked { animation-name:steal-lock-pop; }
+.circular-board { width:min(calc(100% - 20px),540px); aspect-ratio:1; position:relative; display:block; margin:0 auto; padding:0; overflow:hidden; border-radius:50%; background:
+  radial-gradient(circle at center, transparent 0 19%, #c9c1b355 19.2% 19.5%, transparent 19.7% 46%, #c9c1b344 46.2% 46.5%, transparent 46.7%),
+  var(--paper-2);
+}
+.circular-board .tile-slot { position:absolute; z-index:1; display:grid; place-items:center; transform:translate(-50%,-50%); }
+.circular-board .tile { width:100%; height:100%; min-width:0; padding:0; aspect-ratio:auto; font-size:clamp(16px,5.6vw,35px); }
+.circular-board .tile-slot.ring-0 .tile { font-size:clamp(12px,3vw,20px); }
+.circular-board .tile-slot.ring-1 .tile { font-size:clamp(14px,4vw,25px); }
 @keyframes claim-pop { 0% { transform:scale(.92); } 42% { transform:scale(1.1); box-shadow:0 7px 18px #17231f35; } }
 @keyframes steal-pop { 0% { transform:rotate(-2deg) scale(.9); box-shadow:inset 0 0 0 3px var(--coral-dark); } 48% { transform:rotate(2deg) scale(1.13); box-shadow:inset 0 0 0 3px #fff8,0 8px 20px #17231f45; } }
 @keyframes lock-pop { 0% { transform:scale(.9); filter:brightness(1.35); } 48% { transform:scale(1.14); box-shadow:0 0 0 4px #fff9,0 9px 22px #17231f45; } }
