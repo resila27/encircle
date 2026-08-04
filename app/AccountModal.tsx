@@ -84,7 +84,7 @@ export function AccountModal({ account, stats, onClose, onLogin, onLogout }: Pro
           <>
             <p className="eyebrow">Free ENCIRCLE account</p>
             <h2 id="account-title">{codeSent ? "Check your email." : "Keep your progress."}</h2>
-            <p>{codeSent ? `We sent a six-digit code to ${email}.` : "Log in with your email to save games and track your wins across all your devices."}</p>
+            <p>{codeSent ? `We sent a six-digit code to ${email}. Check your inbox and spam folder.` : "Log in with your email to save games and track your wins across all your devices."}</p>
             <form onSubmit={submit}>
               {!codeSent ? (
                 <label>

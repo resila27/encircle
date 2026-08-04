@@ -22,6 +22,7 @@ export const BOARD_ROWS = 5;
 export const BOARD_COLUMNS = 6;
 export const BOARD_SIZE = BOARD_ROWS * BOARD_COLUMNS;
 export const BOARD_VERSION = "5x6-v2";
+const WIN_MESSAGE_HOLD_MS = 2800;
 
 const BASE_LETTERS = "STARECLOUDPINGMBEACHFORYTENASR".split("");
 const WORDS = `
@@ -323,8 +324,26 @@ function bestReplySwing(source: Owner[], letters: string[], usedWords: Set<strin
 export function selectRivalMove(sourceOwners: Owner[], sourcePlayed: PlayedWord[], letters: string[], difficulty: Difficulty, deterministic = false) {
   const usedWords = new Set(sourcePlayed.map(play => play.word));
   const compoundAlreadyPlayed = sourcePlayed.some(play => play.owner === 2 && COMPOUND_WORD_SET.has(play.word));
+  const blanks = sourceOwners.filter(owner => owner === 0).length;
   const maxLength = difficulty === "fierce" ? 15 : difficulty === "clever" ? 10 : 6;
-  const availableCandidates = BOT_WORDS.filter(word => word.length >= 3 && word.length <= maxLength && !blocksPlayedWord(word, usedWords) && (difficulty === "fierce" || !COMPOUND_WORD_SET.has(word) || !compoundAlreadyPlayed) && canForm(word, letters));
+  const minLength = blanks <= 8 ? 2 : 3;
+  const dynamicMax = Math.max(minLength, maxLength);
+  const availableCandidates = BOT_WORDS.filter(word => word.length >= minLength && word.length <= dynamicMax && !blocksPlayedWord(word, usedWords) && (difficulty === "fierce" || !COMPOUND_WORD_SET.has(word) || !compoundAlreadyPlayed) && canForm(word, letters));
+
+  if (blanks > 0 && blanks <= 8) {
+    const guaranteedWin = availableCandidates
+      .map(word => {
+        const ids = chooseTiles(word, letters, sourceOwners, difficulty === "fierce" ? "clever" : difficulty);
+        const nextOwners = claimTiles(ids, 2, sourceOwners);
+        return nextOwners.every(Boolean) ? { word, ids, nextOwners } : null;
+      })
+      .find(Boolean);
+    if (guaranteedWin && guaranteedWin.ids.length) {
+      const { word, ids, nextOwners } = guaranteedWin;
+      const captures = ids.filter(i => sourceOwners[i] === 1 && !protectedTiles(sourceOwners)[i]).length;
+      return { word, ids, nextOwners, score: 9999 + captures, captures };
+    }
+  }
   const candidates = difficulty === "clever"
     ? availableCandidates.filter(word => !availableCandidates.some(longer => isLongerForm(longer, word)))
     : availableCandidates;
@@ -716,7 +735,7 @@ export default function Home() {
     setMessage(filled ? (nextOwners.filter(o=>o===1).length > nextOwners.filter(o=>o===2).length ? "You encircled the board!" : "Every circle is claimed") : `${LABELS[difficulty].name} played ${move.word.toUpperCase()}`);
     if (filled) {
       if (mode === "daily" && dailyDate) window.localStorage.setItem(`gridlock-daily-${dailyDate}`, "complete");
-      window.setTimeout(() => setResultsOpen(true), 700);
+      window.setTimeout(() => setResultsOpen(true), WIN_MESSAGE_HOLD_MS);
     }
   }, [celebrateClaim, dailyDate, difficulty, letters, mode]);
 
@@ -763,7 +782,7 @@ export default function Home() {
       setTurn("done");
       setMessage(nextOwners.filter(o=>o===1).length > nextOwners.filter(o=>o===2).length ? "You encircled the board!" : "Every circle is claimed");
       if (mode === "daily" && dailyDate) window.localStorage.setItem(`gridlock-daily-${dailyDate}`, "complete");
-      window.setTimeout(() => setResultsOpen(true), 700);
+      window.setTimeout(() => setResultsOpen(true), WIN_MESSAGE_HOLD_MS);
       return;
     }
     setTurn("rival");

@@ -26,6 +26,48 @@ function app_config(): array {
     return $config = $loaded;
 }
 
+function app_host_fallback_from_address(): string {
+    $host = strtolower((string) ($_SERVER['HTTP_HOST'] ?? 'playencircle.com'));
+    $host = preg_replace('/:\d+$/', '', $host);
+    if (!preg_match('/^[a-z0-9.-]+\.[a-z]{2,}$/', $host)) $host = 'playencircle.com';
+    return "noreply@{$host}";
+}
+
+function app_mail_from(): string {
+    $configured = (string) (app_config()['mail_from'] ?? '');
+    $configured = trim(preg_replace('/\R/', ' ', $configured));
+    $fallbackAddress = app_host_fallback_from_address();
+
+    if ($configured === '') return "ENCIRCLE <{$fallbackAddress}>";
+    if (str_contains($configured, '<') && str_contains($configured, '>')) {
+        if (preg_match('/<\s*([^<>\s]+)\s*>$/', $configured, $match) && filter_var($match[1], FILTER_VALIDATE_EMAIL)) {
+            return $configured;
+        }
+    }
+    if (filter_var($configured, FILTER_VALIDATE_EMAIL)) return "ENCIRCLE <{$configured}>";
+    return "ENCIRCLE <{$fallbackAddress}>";
+}
+
+function app_mail_from_address(string $fromHeader): string {
+    if (preg_match('/<\s*([^<>\s]+)\s*>$/', $fromHeader, $match)) return $match[1];
+    return '';
+}
+
+function app_send_code_email(string $recipient, string $code): bool {
+    $subject = 'Your ENCIRCLE login code';
+    $message = "Your ENCIRCLE code is {$code}.\n\nIt expires in 10 minutes. If you did not request it, you can ignore this email.";
+    $from = app_mail_from();
+    $fromAddress = app_mail_from_address($from);
+    $headers = "From: {$from}\r\nContent-Type: text/plain; charset=UTF-8";
+    if ($fromAddress === '') return mail($recipient, $subject, $message, $headers);
+    $result = @mail($recipient, $subject, $message, $headers, "-f {$fromAddress}");
+    if (!$result) {
+        error_log("ENCIRCLE API: failed to send via envelope sender; trying default sender for {$recipient}");
+        return @mail($recipient, $subject, $message, $headers);
+    }
+    return true;
+}
+
 function db(): PDO {
     static $pdo;
     if ($pdo instanceof PDO) return $pdo;
@@ -333,10 +375,18 @@ try {
             'INSERT INTO login_codes (email, code_hash, ip_hash, expires_at, created_at) VALUES (?, ?, ?, ?, ?)'
         );
         $statement->execute([$email, $codeHash, $ipHash, gmdate('Y-m-d H:i:s', time() + 600), gmdate('Y-m-d H:i:s')]);
-        $subject = 'Your ENCIRCLE login code';
-        $message = "Your ENCIRCLE code is {$code}.\n\nIt expires in 10 minutes. If you did not request it, you can ignore this email.";
-        $headers = "From: ENCIRCLE <play@typty.com>\r\nContent-Type: text/plain; charset=UTF-8";
-        if (!mail($email, $subject, $message, $headers)) respond(['error' => 'We could not send the email. Please try again.'], 503);
+        $mailSent = app_send_code_email($email, $code);
+        if (!$mailSent) {
+            error_log("ENCIRCLE API: failed to send login code email to {$email}");
+            if (!empty($config['mail_debug_codes'])) {
+                respond([
+                    'ok' => true,
+                    'debug_code' => $code,
+                    'note' => 'Mail sending is currently unavailable. Use this debug code for testing.',
+                ]);
+            }
+            respond(['error' => 'Could not send the login email. Check your spam folder or try again in a moment.'], 503);
+        }
         respond(['ok' => true]);
     }
 
