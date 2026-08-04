@@ -6,50 +6,77 @@ on:
       - beta/5x6-circles
   workflow_dispatch:
 
+permissions:
+  contents: read
+
 jobs:
   deploy:
     runs-on: ubuntu-latest
+
     steps:
-      - uses: actions/checkout@v4
+      - name: Checkout repository
+        uses: actions/checkout@v4
 
- - name: Set up Node.js
-  uses: actions/setup-node@v4
-  with:
-    node-version: '22'
+      - name: Set up Node.js
+        uses: actions/setup-node@v4
+        with:
+          node-version: '22'
 
-- name: Install pnpm
-  run: npm install -g pnpm@latest
+      - name: Install pnpm
+        run: npm install -g pnpm@latest
 
-- name: Install dependencies
-  run: |
-    pnpm install --frozen-lockfile
+      - name: Install dependencies
+        run: |
+          pnpm install --frozen-lockfile
 
-      - name: Build
+      - name: Build site
         run: pnpm run build
 
-      - name: Deploy to DreamHost
+      - name: Configure SSH
         env:
-          DH_KEY: ${{ secrets.DREAMHOST_SSH_KEY }}
+          DH_SSH_KEY: ${{ secrets.DREAMHOST_SSH_KEY }}
           DH_HOST: ${{ secrets.DREAMHOST_HOST }}
           DH_USER: ${{ secrets.DREAMHOST_USER }}
         run: |
           mkdir -p /tmp/encircle-deploy
-          echo "$DH_KEY" > /tmp/encircle-deploy/key
+          echo "$DH_SSH_KEY" > /tmp/encircle-deploy/key
           chmod 600 /tmp/encircle-deploy/key
+
           mkdir -p "$HOME/.ssh"
           cp /tmp/encircle-deploy/key "$HOME/.ssh/deploy_key"
           chmod 600 "$HOME/.ssh/deploy_key"
           ssh-keyscan -H "$DH_HOST" >> "$HOME/.ssh/known_hosts"
 
-          echo '<IfModule mod_headers.c>\n<Files "index.html">\nHeader set Cache-Control "no-store, no-cache, must-revalidate, max-age=0"\nHeader set Pragma "no-cache"\nHeader set Expires "Thu, 01 Jan 1970 00:00:00 GMT"\n</Files>\n<FilesMatch "\\.(js|css|png|jpg|jpeg|gif|svg|webp|ico|woff2?|ttf|otf|woff|eot)$">\nHeader set Cache-Control "public, max-age=31536000, immutable"\n</FilesMatch>\n</IfModule>' > /tmp/encircle-deploy/headers.htaccess
+          cat > /tmp/encircle-deploy/cache-headers.htaccess <<'HTEOF'
+          <IfModule mod_headers.c>
+            <Files "index.html">
+              Header set Cache-Control "no-store, no-cache, must-revalidate, max-age=0"
+              Header set Pragma "no-cache"
+              Header set Expires "Thu, 01 Jan 1970 00:00:00 GMT"
+            </Files>
 
-          targets="domains/playencircle.com domains/playencircle.com/public domains/playencircle.com/public_html playencircle.com playencircle.com/public playencircle.com/public_html public_html/playencircle.com public_html/playencircle.com/public"
+            <FilesMatch "\\.(js|css|png|jpg|jpeg|gif|svg|webp|ico|woff2?|ttf|otf|woff|eot)$">
+              Header set Cache-Control "public, max-age=31536000, immutable"
+            </FilesMatch>
+          </IfModule>
+          HTEOF
+
+      - name: Deploy to DreamHost
+        env:
+          DH_USER: ${{ secrets.DREAMHOST_USER }}
+          DH_HOST: ${{ secrets.DREAMHOST_HOST }}
+        run: |
+          set -euo pipefail
+
+          targets="domains/playencircle.com domains/playencircle.com/public domains/playencircle.com/public_html \
+          playencircle.com playencircle.com/public playencircle.com/public_html public_html/playencircle.com public_html/playencircle.com/public"
+
           SSH_OPTS="-o IdentitiesOnly=yes -o BatchMode=yes -o StrictHostKeyChecking=yes -o UserKnownHostsFile=$HOME/.ssh/known_hosts -i $HOME/.ssh/deploy_key"
           REMOTE="$DH_USER@$DH_HOST"
 
           for target in $targets; do
+            echo "Deploying to: $target"
             rsync -avz --delete --exclude='.DS_Store' -e "ssh $SSH_OPTS" public/ "$REMOTE:$target/"
-            rsync -avz --delete -e "ssh $SSH_OPTS" /tmp/encircle-deploy/headers.htaccess "$REMOTE:$target/.htaccess"
+            rsync -avz --delete -e "ssh $SSH_OPTS" /tmp/encircle-deploy/cache-headers.htaccess "$REMOTE:$target/.htaccess"
+            ssh $SSH_OPTS "$REMOTE" "printf '%s\\n' '$target' > '$target/encircle-deploy-root.txt'"
           done
-
-          ssh $SSH_OPTS "$REMOTE" "printf '%s\n' \"$targets\" > playencircle.com/encircle-deploy-root.txt"
