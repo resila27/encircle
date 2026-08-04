@@ -79,7 +79,7 @@ jobs:
             exit 1
           fi
 
-          REMOTE_CANDIDATES="$DH_USER@$DH_HOST"
+          REMOTE_CANDIDATES="$DH_USER@$DH_HOST dh_cwxxe8@$DH_HOST dh_wy8a2d@$DH_HOST $DH_USER@pdx1-shared-a1-37.dreamhost.com dh_cwxxe8@pdx1-shared-a1-37.dreamhost.com dh_wy8a2d@pdx1-shared-a1-37.dreamhost.com"
           REMOTE=""
 
           for candidate in $REMOTE_CANDIDATES; do
@@ -92,7 +92,7 @@ jobs:
           done
 
           if [ -z "$REMOTE" ]; then
-            echo "Could not authenticate to DreamHost. Check DREAMHOST_HOST and DREAMHOST_USER and the SSH key." >&2
+            echo "Could not authenticate to DreamHost. Check DREAMHOST_HOST and DREAMHOST_USER secrets and the SSH key." >&2
             exit 1
           fi
 
