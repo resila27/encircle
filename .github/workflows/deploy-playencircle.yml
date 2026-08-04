@@ -74,15 +74,18 @@ jobs:
           playencircle.com playencircle.com/public playencircle.com/public_html public_html/playencircle.com public_html/playencircle.com/public"
 
           SSH_OPTS="-o IdentitiesOnly=yes -o BatchMode=yes -o StrictHostKeyChecking=no -o UserKnownHostsFile=$HOME/.ssh/known_hosts -o ConnectTimeout=30 -i $HOME/.ssh/deploy_key"
-          if [ -z "${DH_USER:-}" ] || [ -z "${DH_HOST:-}" ]; then
-            echo "Missing deploy host/user secrets" >&2
-            exit 1
+
+          if [ -n "${DH_USER:-}" ] && [ -n "${DH_HOST:-}" ]; then
+            REMOTE_CANDIDATES="$DH_USER@$DH_HOST"
+          else
+            REMOTE_CANDIDATES=""
           fi
 
-          REMOTE_CANDIDATES="$DH_USER@$DH_HOST dh_cwxxe8@$DH_HOST dh_wy8a2d@$DH_HOST $DH_USER@pdx1-shared-a1-37.dreamhost.com dh_cwxxe8@pdx1-shared-a1-37.dreamhost.com dh_wy8a2d@pdx1-shared-a1-37.dreamhost.com"
+          REMOTE_CANDIDATES="$REMOTE_CANDIDATES dh_cwxxe8@pdx1-shared-a1-37.dreamhost.com dh_wy8a2d@pdx1-shared-a1-37.dreamhost.com"
           REMOTE=""
 
           for candidate in $REMOTE_CANDIDATES; do
+            echo "Testing SSH access for $candidate"
             if ssh $SSH_OPTS "$candidate" "echo AUTH_OK"; then
               REMOTE="$candidate"
               break
@@ -92,15 +95,17 @@ jobs:
           done
 
           if [ -z "$REMOTE" ]; then
-            echo "Could not authenticate to DreamHost. Check DREAMHOST_HOST and DREAMHOST_USER secrets and the SSH key." >&2
+            echo "Could not authenticate to DreamHost. Verify:"
+            echo " - DREAMHOST_USER and DREAMHOST_HOST secrets"
+            echo " - DREAMHOST_SSH_KEY matches authorized key on DreamHost"
             exit 1
           fi
 
-          echo "Deploying with remote: $REMOTE"
+          echo "Deploying to: $REMOTE"
 
           for target in $targets; do
-            echo "Deploying to: $target"
+            echo "Copying files to: $target"
             rsync -avz --delete --exclude='.DS_Store' -e "ssh $SSH_OPTS" public/ "$REMOTE:$target/"
             rsync -avz --delete -e "ssh $SSH_OPTS" /tmp/encircle-deploy/cache-headers.htaccess "$REMOTE:$target/.htaccess"
-            ssh $SSH_OPTS "$REMOTE" "printf '%s\n' '$target' > '$target/encircle-deploy-root.txt'"
+            ssh $SSH_OPTS "$REMOTE" "printf '%s\n' \"$target\" > \"$target/encircle-deploy-root.txt\""
           done
