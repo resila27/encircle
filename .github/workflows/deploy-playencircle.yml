@@ -38,6 +38,7 @@ jobs:
           DH_HOST: ${{ secrets.DREAMHOST_HOST }}
           DH_USER: ${{ secrets.DREAMHOST_USER }}
         run: |
+          set -euo pipefail
           mkdir -p /tmp/encircle-deploy
           echo "$DH_SSH_KEY" > /tmp/encircle-deploy/key
           chmod 600 /tmp/encircle-deploy/key
@@ -45,8 +46,10 @@ jobs:
           mkdir -p "$HOME/.ssh"
           cp /tmp/encircle-deploy/key "$HOME/.ssh/deploy_key"
           chmod 600 "$HOME/.ssh/deploy_key"
+          rm -f "$HOME/.ssh/known_hosts"
           ssh-keyscan -H "$DH_HOST" >> "$HOME/.ssh/known_hosts"
 
+          : > /tmp/encircle-deploy/cache-headers.htaccess
           cat > /tmp/encircle-deploy/cache-headers.htaccess <<'HTEOF'
           <IfModule mod_headers.c>
             <Files "index.html">
@@ -54,7 +57,6 @@ jobs:
               Header set Pragma "no-cache"
               Header set Expires "Thu, 01 Jan 1970 00:00:00 GMT"
             </Files>
-
             <FilesMatch "\\.(js|css|png|jpg|jpeg|gif|svg|webp|ico|woff2?|ttf|otf|woff|eot)$">
               Header set Cache-Control "public, max-age=31536000, immutable"
             </FilesMatch>
@@ -71,12 +73,34 @@ jobs:
           targets="domains/playencircle.com domains/playencircle.com/public domains/playencircle.com/public_html \
           playencircle.com playencircle.com/public playencircle.com/public_html public_html/playencircle.com public_html/playencircle.com/public"
 
-          SSH_OPTS="-o IdentitiesOnly=yes -o BatchMode=yes -o StrictHostKeyChecking=yes -o UserKnownHostsFile=$HOME/.ssh/known_hosts -i $HOME/.ssh/deploy_key"
-          REMOTE="$DH_USER@$DH_HOST"
+          SSH_OPTS="-o IdentitiesOnly=yes -o BatchMode=yes -o StrictHostKeyChecking=no -o UserKnownHostsFile=$HOME/.ssh/known_hosts -o ConnectTimeout=30 -i $HOME/.ssh/deploy_key"
+          if [ -z "${DH_USER:-}" ] || [ -z "${DH_HOST:-}" ]; then
+            echo "Missing deploy host/user secrets" >&2
+            exit 1
+          fi
+
+          REMOTE_CANDIDATES="$DH_USER@$DH_HOST"
+          REMOTE=""
+
+          for candidate in $REMOTE_CANDIDATES; do
+            if ssh $SSH_OPTS "$candidate" "echo AUTH_OK"; then
+              REMOTE="$candidate"
+              break
+            else
+              echo "SSH auth failed for $candidate"
+            fi
+          done
+
+          if [ -z "$REMOTE" ]; then
+            echo "Could not authenticate to DreamHost. Check DREAMHOST_HOST and DREAMHOST_USER and the SSH key." >&2
+            exit 1
+          fi
+
+          echo "Deploying with remote: $REMOTE"
 
           for target in $targets; do
             echo "Deploying to: $target"
             rsync -avz --delete --exclude='.DS_Store' -e "ssh $SSH_OPTS" public/ "$REMOTE:$target/"
             rsync -avz --delete -e "ssh $SSH_OPTS" /tmp/encircle-deploy/cache-headers.htaccess "$REMOTE:$target/.htaccess"
-            ssh $SSH_OPTS "$REMOTE" "printf '%s\\n' '$target' > '$target/encircle-deploy-root.txt'"
+            ssh $SSH_OPTS "$REMOTE" "printf '%s\n' '$target' > '$target/encircle-deploy-root.txt'"
           done
