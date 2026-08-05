@@ -101,6 +101,36 @@ export const BOARD_LAYOUT = circularBoardLayout();
 const OUTER_TILES = BOARD_LAYOUT.map((tile, index) => tile.ring === BOARD_RING_COUNTS.length - 1 ? index : -1).filter(index => index >= 0);
 const CENTER_TILES = [0];
 
+// Decorative board rendered on the home screen. Spells real words instead of random letters:
+// the center + inner ring reads CLAIMED, the next ring reads STEAL/BOARD, and the outer ring
+// reads STRONGHOLD/WIN — matching the 1/6/10/13 tile counts of each ring exactly.
+const HOME_PREVIEW_LETTERS = "CLAIMEDSTEALBOARDSTRONGHOLDWIN".split("");
+const HOME_PREVIEW_OWN = [0, 1, 2, 3, 4, 5, 6];
+const HOME_PREVIEW_RIVAL = [27, 28, 29];
+
+// Small static rendering of the 30-tile circular board, used for decorative previews (the home
+// screen header and the daily-challenge card) rather than the interactive game board.
+function BoardPreview({ letters, own = [], rival = [], className = "" }: { letters: readonly string[]; own?: readonly number[]; rival?: readonly number[]; className?: string }) {
+  return (
+    <svg className={`board-preview-svg ${className}`} viewBox="0 0 100 100" aria-hidden="true">
+      {letters.map((letter, i) => {
+        const layout = BOARD_LAYOUT[i];
+        if (!layout) return null;
+        const [tx, ty] = polarPoint(layout.ring === 0 ? 0 : (layout.rIn + layout.rOut) / 2, (layout.a0 + layout.a1) / 2);
+        const tileClass = `tile ${layout.ring === 0 ? "ring-0" : ""} ${own.includes(i) ? "preview-own" : ""} ${rival.includes(i) ? "preview-rival" : ""}`;
+        return (
+          <g className={tileClass} key={i}>
+            {layout.ring === 0
+              ? <circle className="tile-shape" cx={50} cy={50} r={layout.rOut} />
+              : <path className="tile-shape" d={sectorPath(layout.rIn, layout.rOut, layout.a0, layout.a1)} />}
+            <text className="tile-letter" dy="0.32em" textAnchor="middle" x={tx} y={ty}>{letter}</text>
+          </g>
+        );
+      })}
+    </svg>
+  );
+}
+
 function computeTileNeighbors(layout: SectorLayout[]): number[][] {
   const neighborSets = layout.map(() => new Set<number>());
   const link = (a: number, b: number) => { neighborSets[a].add(b); neighborSets[b].add(a); };
@@ -521,7 +551,7 @@ function describeOutcome(finalOwners: Owner[], difficulty: Difficulty) {
   const filled = finalOwners.every(Boolean);
   const you = finalOwners.filter(o => o === 1).length;
   const rival = finalOwners.filter(o => o === 2).length;
-  if (filled) return you > rival ? "You encircled the board!" : "Every circle is claimed";
+  if (filled) return you > rival ? "You encircled the board!" : "Every tile is claimed";
   if (you > rival) return "You’ve locked in the win — no comeback possible.";
   if (rival > you) return `${LABELS[difficulty].name} has locked in the win.`;
   return "The outcome is settled.";
@@ -555,28 +585,28 @@ function loadDailyResult(date: string): DailyResult | null {
 const TUTORIAL_SLIDES = [
   {
     kind: "claim", eyebrow: "The basic move", title: "Make words. Take ground.",
-    body: "Choose circles anywhere on the 30-circle board, then submit your word. Every circle you use becomes yours, so useful words are also territory moves.",
+    body: "Choose tiles anywhere on the 30-tile board, then submit your word. Every tile you use becomes yours, so useful words are also territory moves.",
   },
   {
     kind: "defend", eyebrow: "Think one turn ahead", title: "Protect yours. Break theirs.",
-    body: "A surrounded circle is locked while its support holds. Defend your clusters, break the circles supporting theirs, and remember: every move changes both players’ position.",
+    body: "A surrounded tile is locked while its support holds. Defend your clusters, break the tiles supporting theirs, and remember: every move changes both players’ position.",
   },
   {
     kind: "steal", eyebrow: "The score swings", title: "Their loss is your gain.",
-    body: "ENCIRCLE is a zero-sum fight for 30 circles. Use a rival’s letter and its circle changes sides: you gain one while they lose one, making a steal twice as valuable as claiming empty space.",
+    body: "ENCIRCLE is a zero-sum fight for 30 tiles. Use a rival’s letter and its tile changes sides: you gain one while they lose one, making a steal twice as valuable as claiming empty space.",
   },
   {
     kind: "corner", eyebrow: "Build a stronghold", title: "Start on the outer ring.",
-    body: "Circles on the outer ring have fewer neighbors to secure. Capture one early, protect the circles around it, then grow your connected territory toward the center.",
+    body: "Tiles on the outer ring have fewer neighbors to secure. Capture one early, protect the tiles around it, then grow your connected territory toward the center.",
   },
   {
     kind: "words", eyebrow: "Make language work harder", title: "Stretch the word.",
-    body: "Before submitting, look for a prefix or suffix: LOCK can become UNLOCKED. Then look again for compounds: WORD and PLAY can become WORDPLAY. Longer forms claim more circles and create more chances to steal.",
+    body: "Before submitting, look for a prefix or suffix: LOCK can become UNLOCKED. Then look again for compounds: WORD and PLAY can become WORDPLAY. Longer forms claim more tiles and create more chances to steal.",
   },
 ] as const;
 
-// Builds a full 30-circle letter set for a demo board: the word's letters land on the exact
-// circles the demo selects (in order), everything else is filled with plausible background letters.
+// Builds a full 30-tile letter set for a demo board: the word's letters land on the exact
+// tiles the demo selects (in order), everything else is filled with plausible background letters.
 function demoLetters(word: string, selected: readonly number[]) {
   const letters = [...BASE_LETTERS];
   [...word.toUpperCase()].forEach((letter, i) => { if (selected[i] !== undefined) letters[selected[i]] = letter; });
@@ -584,19 +614,20 @@ function demoLetters(word: string, selected: readonly number[]) {
 }
 
 // Every "locked"/"unlocking" tile below is mechanically real: it only appears locked because every
-// one of its neighbors on the actual 30-circle board (see TILE_NEIGHBORS) is owned by that player.
+// one of its neighbors on the actual 30-tile board (see TILE_NEIGHBORS) is owned by that player.
 const TUTORIAL_DEMOS = {
-  // Claiming the six circles that ring the center (1-6) surrounds circle 0, so it locks for free.
+  // Playing CIRCLES claims the six tiles ringing the center (1-6) plus the center tile itself (0,
+  // landing the final S there), so submitting the word both captures and locks the center in one move.
   claim: {
-    word: "CIRCLE",
-    selected: [1, 2, 3, 4, 5, 6],
+    word: "CIRCLES",
+    selected: [1, 2, 3, 4, 5, 6, 0],
     own: [],
     rival: [],
     changing: [],
     locked: [0],
     unlocking: [],
   },
-  // Circle 21 sits on the outer ring with only 3 neighbors (10, 20, 22), so it locks in one move —
+  // Tile 21 sits on the outer ring with only 3 neighbors (10, 20, 22), so it locks in one move —
   // the whole point of starting on the outer ring instead of fighting for the center.
   corner: {
     word: "ANCHOR",
@@ -607,18 +638,19 @@ const TUTORIAL_DEMOS = {
     locked: [21],
     unlocking: [],
   },
-  // Stealing circles 8 and 20 flips them from the rival straight to you.
+  // Playing TAKEOVERS steals five tiles straight out of the rival's cluster (8, 20, 9, 19, 24) and
+  // lands the final S on the center — a much bigger swing than a single-tile steal.
   steal: {
-    word: "TAKEOVER",
-    selected: [8, 20, 1, 2, 3, 4, 5, 6],
+    word: "TAKEOVERS",
+    selected: [8, 20, 9, 19, 24, 1, 2, 3, 0],
     own: [],
-    rival: [8, 20, 9, 19, 24, 25],
-    changing: [8, 20],
+    rival: [8, 20, 9, 19, 24, 25, 10, 11],
+    changing: [8, 20, 9, 19, 24],
     locked: [],
     unlocking: [],
   },
-  // Circle 9 was locked because the rival held all 5 of its neighbors (2, 8, 10, 19, 20). Stealing
-  // two of those neighbors (10 and 20) — while also using them to lock your own circle 21 — breaks it.
+  // Tile 9 was locked because the rival held all 5 of its neighbors (2, 8, 10, 19, 20). Stealing
+  // two of those neighbors (10 and 20) — while also using them to lock your own tile 21 — breaks it.
   defend: {
     word: "UNLOCK",
     selected: [21, 10, 20, 22, 1, 3],
@@ -666,7 +698,6 @@ function TutorialDemo({ kind }: { kind: typeof TUTORIAL_SLIDES[number]["kind"] }
           {letters.map((letter, i) => {
             const layout = BOARD_LAYOUT[i];
             const [tx, ty] = polarPoint(layout.ring === 0 ? 0 : (layout.rIn + layout.rOut) / 2, (layout.a0 + layout.a1) / 2);
-            const showKey = hasTutorialTile(demo.locked, i) || hasTutorialTile(demo.unlocking, i);
             const tileClass = `${layout.ring === 0 ? "ring-0" : ""} ${hasTutorialTile(demo.own, i) ? "demo-own" : ""} ${hasTutorialTile(demo.rival, i) ? "demo-rival" : ""} ${hasTutorialTile(demo.selected, i) ? "demo-selected" : ""} ${hasTutorialTile(demo.changing, i) ? "demo-changing" : ""} ${hasTutorialTile(demo.locked, i) ? "demo-locks" : ""} ${hasTutorialTile(demo.unlocking, i) ? "demo-unlocking" : ""}`;
             return (
               <g className={tileClass} key={i} style={{ "--tile-delay": `${Math.max(0, demo.selected.indexOf(i)) * .2}s` } as CSSProperties}>
@@ -674,7 +705,6 @@ function TutorialDemo({ kind }: { kind: typeof TUTORIAL_SLIDES[number]["kind"] }
                   ? <circle className="tile-shape" cx={50} cy={50} r={layout.rOut} />
                   : <path className="tile-shape" d={sectorPath(layout.rIn, layout.rOut, layout.a0, layout.a1)} />}
                 <text className="tile-letter" dy="0.32em" textAnchor="middle" x={tx} y={ty}>{letter}</text>
-                {showKey && <text className="tile-lock" dy="0.32em" textAnchor="middle" x={tx} y={ty - (layout.ring === 0 ? layout.rOut : layout.rOut - layout.rIn) * .42}>🔑</text>}
               </g>
             );
           })}
@@ -1097,19 +1127,19 @@ export default function Home() {
       <button className="account-chip home-account" onClick={() => setAccountOpen(true)} type="button">{account ? "My progress" : "Save progress"}</button>
       <section className="brand-block">
         <div className="mini-field" aria-hidden="true">
-          {[..."STARECLOUDPINGMBEACHFORYTENASR"].map((letter, i) => <span key={i}>{letter}</span>)}
+          <BoardPreview letters={HOME_PREVIEW_LETTERS} own={HOME_PREVIEW_OWN} rival={HOME_PREVIEW_RIVAL} />
         </div>
         <p className="eyebrow">A battle of words</p>
         <p className="beta-label">Circular board beta</p>
         <h1>ENCIRCLE</h1>
-        <p className="lede">Find words. Claim circles.<br/>Surround letters to make them yours for good.</p>
+        <p className="lede">Find words. Claim tiles.<br/>Surround letters to make them yours for good.</p>
       </section>
       <button aria-label={dailyCompleted ? "View today’s daily challenge results" : "Play today’s daily challenge"} className="daily-feature" onClick={() => startDaily()} type="button">
         <span className="daily-preview-grid" aria-hidden="true">
-          {dailyPreviewLetters.map((letter, i) => <span className={i === 0 || i === 1 || i === 6 ? "preview-own" : i === 23 || i === 28 || i === 29 ? "preview-rival" : ""} key={i}>{letter}</span>)}
+          <BoardPreview letters={dailyPreviewLetters} own={[0, 1, 2]} rival={[20, 21, 22]} />
         </span>
         <span className="daily-feature-copy">
-          <small>Today’s circles · {new Date().toLocaleDateString(undefined, { month: "short", day: "numeric" })}</small>
+          <small>Today’s tiles · {new Date().toLocaleDateString(undefined, { month: "short", day: "numeric" })}</small>
           <strong>{dailyCompleted ? "View today’s results" : "Play today’s challenge"}</strong>
           <b>Same board for everyone</b>
           <i>→</i>
@@ -1164,7 +1194,7 @@ export default function Home() {
     <><main className="rules-shell">
       <button className="back" onClick={() => setScreen("home")} aria-label="Back">←</button>
       <p className="eyebrow">Three simple rules</p>
-      <h2>Claim the circles</h2>
+      <h2>Claim the tiles</h2>
       <div className="rules-list">
         <article><span>1</span><div><h3>Make a word</h3><p>Tap letters in any order. Every letter you use becomes yours.</p></div></article>
         <article><span>2</span><div><h3>Steal their letters</h3><p>Use a rival’s letter in your word and it changes to your color.</p></div></article>
@@ -1272,7 +1302,7 @@ export default function Home() {
         <section className="results-modal" role="dialog" aria-modal="true" aria-labelledby="results-title">
           <button className="modal-close" onClick={() => setResultsOpen(false)} type="button" aria-label="Close">×</button>
           <p className="eyebrow">{mode === "daily" ? `Encircle Daily · ${dailyDate}` : `Against ${LABELS[difficulty].name}`}</p>
-          <h2 id="results-title">{result === "win" ? "Circles claimed!" : result === "loss" ? "The rival held on." : "Deadlocked."}</h2>
+          <h2 id="results-title">{result === "win" ? "Tiles claimed!" : result === "loss" ? "The rival held on." : "Deadlocked."}</h2>
           <div className="final-score"><strong>{yourScore}</strong><span>–</span><strong>{rivalScore}</strong></div>
           <div className="result-highlights">
             <div><span>Best word</span><button title={longestWord.toUpperCase()} type="button" onClick={() => longestWord && void lookUpWord(longestWord)}>{longestWord ? longestWord.toUpperCase() : "—"}</button></div>
