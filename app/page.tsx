@@ -776,7 +776,9 @@ export default function Home() {
   const longestWord = played.reduce((best, play) => play.word.length > best.length ? play.word : best, "");
   const biggestSteal = played.filter(play => play.owner === 1).reduce((best, play) => Math.max(best, play.captures ?? 0), 0);
   const result = yourScore > rivalScore ? "win" : yourScore < rivalScore ? "loss" : "tie";
-  const dailyCompleted = typeof window !== "undefined" && window.localStorage.getItem(`gridlock-daily-${todayKey()}`) === "complete";
+  // Trust the saved results snapshot itself, not just the old completion flag — a stale flag with
+  // no snapshot behind it (e.g. from before this check existed) should offer a fresh game, not a broken "results" link.
+  const dailyCompleted = typeof window !== "undefined" && loadDailyResult(todayKey()) !== null;
   const dailyPreviewLetters = useMemo(() => seededLetters(`GRIDLOCK-${todayKey()}`), []);
   const archiveDates = useMemo(() => calendarDays(archiveMonth), [archiveMonth]);
   const archiveMonthName = useMemo(() => {
