@@ -126,13 +126,34 @@ const TILE_NEIGHBORS = computeTileNeighbors(BOARD_LAYOUT);
 const OUTER_MIN_NEIGHBORS = Math.min(...OUTER_TILES.map(index => TILE_NEIGHBORS[index].length));
 const RING_ANCHORS = OUTER_TILES.filter(index => TILE_NEIGHBORS[index].length === OUTER_MIN_NEIGHBORS);
 
-function shuffledLetters() {
-  const a = [...BASE_LETTERS];
-  for (let i = a.length - 1; i > 0; i--) {
-    const j = Math.floor(Math.random() * (i + 1));
-    [a[i], a[j]] = [a[j], a[i]];
+// Roughly Scrabble-like English letter frequencies, tuned so games stay easy to form words from
+// (a healthy share of common vowels/consonants, rare letters like Q/X/Z/J appear only occasionally).
+const LETTER_WEIGHTS: Record<string, number> = {
+  A: 9, B: 2, C: 3, D: 4, E: 12, F: 2, G: 3, H: 3, I: 9, J: 1,
+  K: 1, L: 4, M: 3, N: 6, O: 8, P: 2, Q: 1, R: 6, S: 6, T: 6,
+  U: 4, V: 1, W: 2, X: 1, Y: 2, Z: 1,
+};
+const LETTER_POOL = Object.entries(LETTER_WEIGHTS).flatMap(([letter, weight]) => Array(weight).fill(letter));
+const VOWELS = new Set(["A", "E", "I", "O", "U"]);
+const MIN_BOARD_VOWELS = 9;
+
+// Draws a fresh random set of 30 letters (not just a reshuffle of a fixed set), with enough vowels
+// to keep the board playable. `random` is injected so the daily challenge can use a seeded version.
+function drawLetters(random: () => number, count = BOARD_SIZE) {
+  const letters = Array.from({ length: count }, () => LETTER_POOL[Math.floor(random() * LETTER_POOL.length)]);
+  let guard = 0;
+  while (letters.filter(letter => VOWELS.has(letter)).length < MIN_BOARD_VOWELS && guard < 200) {
+    const consonantIndexes = letters.map((letter, i) => VOWELS.has(letter) ? -1 : i).filter(i => i >= 0);
+    if (!consonantIndexes.length) break;
+    const vowelPool = ["A", "E", "I", "O", "U"];
+    letters[consonantIndexes[Math.floor(random() * consonantIndexes.length)]] = vowelPool[Math.floor(random() * vowelPool.length)];
+    guard++;
   }
-  return a;
+  return letters;
+}
+
+function shuffledLetters() {
+  return drawLetters(Math.random);
 }
 
 function todayKey() {
@@ -145,8 +166,12 @@ function todayKey() {
 
 const DAILY_LAUNCH_DATE = "2026-08-02";
 
+function findBlockingPlayedWord(candidate: string, playedWords: Iterable<string>) {
+  return [...playedWords].find(previous => previous === candidate || previous.startsWith(candidate));
+}
+
 function blocksPlayedWord(candidate: string, playedWords: Iterable<string>) {
-  return [...playedWords].some(previous => previous === candidate || previous.startsWith(candidate));
+  return findBlockingPlayedWord(candidate, playedWords) !== undefined;
 }
 
 const WORD_PREFIXES = ["re", "un", "mis", "dis", "pre", "out", "over"];
@@ -190,12 +215,7 @@ function seededLetters(seed: string) {
     value ^= value + Math.imul(value ^ value >>> 7, value | 61);
     return ((value ^ value >>> 14) >>> 0) / 4294967296;
   };
-  const letters = [...BASE_LETTERS];
-  for (let i = letters.length - 1; i > 0; i--) {
-    const j = Math.floor(random() * (i + 1));
-    [letters[i], letters[j]] = [letters[j], letters[i]];
-  }
-  return letters;
+  return drawLetters(random);
 }
 
 export function neighbors(index: number) {
@@ -213,6 +233,19 @@ export function claimTiles(tileIds: number[], owner: 1 | 2, source: Owner[]) {
     if (!(source[i] !== 0 && source[i] !== owner && protectedNow[i])) next[i] = owner;
   });
   return next;
+}
+
+// Returns "you" | "rival" | "tie" once the outcome is locked in, or null while it's still contested.
+// The board doesn't need to fill completely: once the remaining blanks can no longer change who's
+// ahead, the game is decided and should end right there instead of playing out every last circle.
+export function decidedOutcome(owners: Owner[]): "you" | "rival" | "tie" | null {
+  const you = owners.filter(o => o === 1).length;
+  const rival = owners.filter(o => o === 2).length;
+  const blanks = owners.length - you - rival;
+  if (blanks === 0) return you > rival ? "you" : rival > you ? "rival" : "tie";
+  if (you > rival + blanks) return "you";
+  if (rival > you + blanks) return "rival";
+  return null;
 }
 
 function boardDistance(left: number, right: number) {
@@ -327,6 +360,27 @@ function canForm(word: string, letters: string[]) {
   });
 }
 
+// Used only to check whether a word can close the game out: for each letter, prefer an empty circle
+// over a capturable rival circle over one of the bot's own circles, so the search below reliably
+// finds a fill/finish when one exists instead of missing it due to the usual strategic tile picks.
+function chooseFinishingTiles(word: string, letters: string[], owners: Owner[]) {
+  const locked = protectedTiles(owners);
+  const used = new Set<number>();
+  const picks: number[] = [];
+  for (const letter of word.toUpperCase()) {
+    const candidates = letters.map((l, i) => l === letter && !used.has(i) ? i : -1).filter(i => i >= 0);
+    if (!candidates.length) return null;
+    candidates.sort((a, b) => {
+      const rank = (i: number) => owners[i] === 0 ? 3 : owners[i] === 1 && !locked[i] ? 2 : owners[i] === 2 ? 1 : 0;
+      return rank(b) - rank(a);
+    });
+    const pick = candidates[0];
+    used.add(pick);
+    picks.push(pick);
+  }
+  return picks;
+}
+
 export function chooseTiles(word: string, letters: string[], owners: Owner[], difficulty: Difficulty) {
   const locked = protectedTiles(owners);
   if (difficulty === "fierce") {
@@ -400,16 +454,21 @@ export function selectRivalMove(sourceOwners: Owner[], sourcePlayed: PlayedWord[
   const dynamicMax = Math.max(minLength, maxLength);
   const availableCandidates = BOT_WORDS.filter(word => word.length >= minLength && word.length <= dynamicMax && !blocksPlayedWord(word, usedWords) && (difficulty === "fierce" || !COMPOUND_WORD_SET.has(word) || !compoundAlreadyPlayed) && canForm(word, letters));
 
-  if (blanks > 0 && blanks <= 8) {
-    const guaranteedWin = availableCandidates
+  if (blanks > 0) {
+    const finishers = availableCandidates
       .map(word => {
-        const ids = chooseTiles(word, letters, sourceOwners, difficulty === "fierce" ? "clever" : difficulty);
+        const ids = chooseFinishingTiles(word, letters, sourceOwners);
+        if (!ids) return null;
         const nextOwners = claimTiles(ids, 2, sourceOwners);
-        return nextOwners.every(Boolean) ? { word, ids, nextOwners } : null;
+        return decidedOutcome(nextOwners) === "rival" ? { word, ids, nextOwners, remainingBlanks: nextOwners.filter(o => o === 0).length } : null;
       })
-      .find(Boolean);
-    if (guaranteedWin && guaranteedWin.ids.length) {
-      const { word, ids, nextOwners } = guaranteedWin;
+      .filter((entry): entry is { word: string; ids: number[]; nextOwners: Owner[]; remainingBlanks: number } => entry !== null)
+      // Prefer the move that closes the game out soonest (fewest circles left undecided);
+      // among ties, take the longer word since it locks in more ground along the way.
+      .sort((a, b) => a.remainingBlanks - b.remainingBlanks || b.word.length - a.word.length);
+    const finisher = finishers[0];
+    if (finisher) {
+      const { word, ids, nextOwners } = finisher;
       const captures = ids.filter(i => sourceOwners[i] === 1 && !protectedTiles(sourceOwners)[i]).length;
       return { word, ids, nextOwners, score: 9999 + captures, captures };
     }
@@ -457,6 +516,42 @@ const LABELS: Record<Difficulty, { name: string; note: string; face: string }> =
   fierce: { name: "Fierce", note: "Can you keep up?", face: "◉‿◉" },
 };
 
+// The game can end before every circle is filled once the outcome is locked in (see decidedOutcome).
+function describeOutcome(finalOwners: Owner[], difficulty: Difficulty) {
+  const filled = finalOwners.every(Boolean);
+  const you = finalOwners.filter(o => o === 1).length;
+  const rival = finalOwners.filter(o => o === 2).length;
+  if (filled) return you > rival ? "You encircled the board!" : "Every circle is claimed";
+  if (you > rival) return "You’ve locked in the win — no comeback possible.";
+  if (rival > you) return `${LABELS[difficulty].name} has locked in the win.`;
+  return "The outcome is settled.";
+}
+
+type DailyResult = { letters: string[]; owners: Owner[]; played: PlayedWord[]; message: string };
+
+function dailyResultKey(date: string) {
+  return `gridlock-daily-result-${date}`;
+}
+
+function saveDailyResult(date: string, result: DailyResult) {
+  if (typeof window === "undefined") return;
+  window.localStorage.setItem(`gridlock-daily-${date}`, "complete");
+  window.localStorage.setItem(dailyResultKey(date), JSON.stringify(result));
+}
+
+function loadDailyResult(date: string): DailyResult | null {
+  if (typeof window === "undefined") return null;
+  const raw = window.localStorage.getItem(dailyResultKey(date));
+  if (!raw) return null;
+  try {
+    const parsed = JSON.parse(raw) as Partial<DailyResult>;
+    if (!Array.isArray(parsed.letters) || !Array.isArray(parsed.owners) || !Array.isArray(parsed.played)) return null;
+    return parsed as DailyResult;
+  } catch {
+    return null;
+  }
+}
+
 const TUTORIAL_SLIDES = [
   {
     kind: "claim", eyebrow: "The basic move", title: "Make words. Take ground.",
@@ -480,48 +575,63 @@ const TUTORIAL_SLIDES = [
   },
 ] as const;
 
-export const TUTORIAL_DEMOS = {
+// Builds a full 30-circle letter set for a demo board: the word's letters land on the exact
+// circles the demo selects (in order), everything else is filled with plausible background letters.
+function demoLetters(word: string, selected: readonly number[]) {
+  const letters = [...BASE_LETTERS];
+  [...word.toUpperCase()].forEach((letter, i) => { if (selected[i] !== undefined) letters[selected[i]] = letter; });
+  return letters;
+}
+
+// Every "locked"/"unlocking" tile below is mechanically real: it only appears locked because every
+// one of its neighbors on the actual 30-circle board (see TILE_NEIGHBORS) is owned by that player.
+const TUTORIAL_DEMOS = {
+  // Claiming the six circles that ring the center (1-6) surrounds circle 0, so it locks for free.
   claim: {
     word: "CIRCLE",
-    letters: "CILRECRCEDPINGMBEACHFORYTENASR".split(""),
-    selected: [0, 1, 6, 7, 2, 8],
+    selected: [1, 2, 3, 4, 5, 6],
     own: [],
     rival: [],
     changing: [],
-    locked: [0, 1],
+    locked: [0],
     unlocking: [],
   },
-  steal: {
-    word: "TAKEOVER",
-    letters: "TAKRECEOVDPIERMBEACHFORYTENASR".split(""),
-    selected: [0, 1, 2, 6, 7, 8, 12, 13],
-    own: [],
-    rival: [0, 2, 7, 12, 17, 22, 23, 29],
-    changing: [0, 2, 7, 12],
-    locked: [0, 1, 6],
-    unlocking: [],
-  },
+  // Circle 21 sits on the outer ring with only 3 neighbors (10, 20, 22), so it locks in one move —
+  // the whole point of starting on the outer ring instead of fighting for the center.
   corner: {
     word: "ANCHOR",
-    letters: "ANORECCHRDPINGMBEACHFORYTENASR".split(""),
-    selected: [0, 1, 6, 7, 2, 8],
+    selected: [21, 10, 20, 22, 9, 11],
     own: [],
     rival: [],
     changing: [],
-    locked: [0, 1],
+    locked: [21],
     unlocking: [],
   },
+  // Stealing circles 8 and 20 flips them from the rival straight to you.
+  steal: {
+    word: "TAKEOVER",
+    selected: [8, 20, 1, 2, 3, 4, 5, 6],
+    own: [],
+    rival: [8, 20, 9, 19, 24, 25],
+    changing: [8, 20],
+    locked: [],
+    unlocking: [],
+  },
+  // Circle 9 was locked because the rival held all 5 of its neighbors (2, 8, 10, 19, 20). Stealing
+  // two of those neighbors (10 and 20) — while also using them to lock your own circle 21 — breaks it.
   defend: {
     word: "UNLOCK",
-    letters: "UNARECLOKDCINGMBEACHFORYTENASR".split(""),
-    selected: [0, 1, 6, 7, 10, 8],
+    selected: [21, 10, 20, 22, 1, 3],
     own: [],
-    rival: [4, 5, 10, 11, 17, 22],
-    changing: [10],
-    locked: [0],
-    unlocking: [5],
+    rival: [9, 2, 8, 19, 10, 20],
+    changing: [10, 20],
+    locked: [21],
+    unlocking: [9],
   },
-} as const;
+} satisfies Record<string, {
+  word: string; selected: readonly number[]; own: readonly number[]; rival: readonly number[];
+  changing: readonly number[]; locked: readonly number[]; unlocking: readonly number[];
+}>;
 
 const hasTutorialTile = (tiles: readonly number[], tile: number) => tiles.includes(tile);
 
@@ -544,6 +654,7 @@ function TutorialDemo({ kind }: { kind: typeof TUTORIAL_SLIDES[number]["kind"] }
     </div>
   );
   const demo = TUTORIAL_DEMOS[kind];
+  const letters = useMemo(() => demoLetters(demo.word, demo.selected), [demo]);
   const beforeScore: [number, number] = [new Set(demo.own).size, new Set(demo.rival).size];
   const afterScore: [number, number] = [new Set([...demo.own, ...demo.selected]).size, demo.rival.filter(tile => !hasTutorialTile(demo.selected, tile)).length];
   return (
@@ -551,11 +662,23 @@ function TutorialDemo({ kind }: { kind: typeof TUTORIAL_SLIDES[number]["kind"] }
       <TutorialScore before={beforeScore} after={afterScore} />
       <div className="tutorial-wordline"><span>PLAY</span><strong>{demo.word}</strong>{kind === "defend" && <b className="tutorial-submit">SUBMIT</b>}</div>
       <div className="tutorial-board">
-        {demo.letters.map((letter, i) => <span
-          className={`${hasTutorialTile(demo.own, i) ? "demo-own" : ""} ${hasTutorialTile(demo.rival, i) ? "demo-rival" : ""} ${hasTutorialTile(demo.selected, i) ? "demo-selected" : ""} ${hasTutorialTile(demo.changing, i) ? "demo-changing" : ""} ${hasTutorialTile(demo.locked, i) ? "demo-locks" : ""} ${hasTutorialTile(demo.unlocking, i) ? "demo-unlocking" : ""}`}
-          key={i}
-          style={{ "--tile-delay": `${Math.max(0, (demo.selected as readonly number[]).indexOf(i)) * .2}s` } as CSSProperties}
-        >{letter}{(hasTutorialTile(demo.locked, i) || hasTutorialTile(demo.unlocking, i)) && <i>🔑</i>}</span>)}
+        <svg className="tutorial-board-svg" viewBox="0 0 100 100">
+          {letters.map((letter, i) => {
+            const layout = BOARD_LAYOUT[i];
+            const [tx, ty] = polarPoint(layout.ring === 0 ? 0 : (layout.rIn + layout.rOut) / 2, (layout.a0 + layout.a1) / 2);
+            const showKey = hasTutorialTile(demo.locked, i) || hasTutorialTile(demo.unlocking, i);
+            const tileClass = `${layout.ring === 0 ? "ring-0" : ""} ${hasTutorialTile(demo.own, i) ? "demo-own" : ""} ${hasTutorialTile(demo.rival, i) ? "demo-rival" : ""} ${hasTutorialTile(demo.selected, i) ? "demo-selected" : ""} ${hasTutorialTile(demo.changing, i) ? "demo-changing" : ""} ${hasTutorialTile(demo.locked, i) ? "demo-locks" : ""} ${hasTutorialTile(demo.unlocking, i) ? "demo-unlocking" : ""}`;
+            return (
+              <g className={tileClass} key={i} style={{ "--tile-delay": `${Math.max(0, demo.selected.indexOf(i)) * .2}s` } as CSSProperties}>
+                {layout.ring === 0
+                  ? <circle className="tile-shape" cx={50} cy={50} r={layout.rOut} />
+                  : <path className="tile-shape" d={sectorPath(layout.rIn, layout.rOut, layout.a0, layout.a1)} />}
+                <text className="tile-letter" dy="0.32em" textAnchor="middle" x={tx} y={ty}>{letter}</text>
+                {showKey && <text className="tile-lock" dy="0.32em" textAnchor="middle" x={tx} y={ty - (layout.ring === 0 ? layout.rOut : layout.rOut - layout.rIn) * .42}>🔑</text>}
+              </g>
+            );
+          })}
+        </svg>
       </div>
     </div>
   );
@@ -786,7 +909,31 @@ export default function Home() {
   };
 
   const newGame = (level = difficulty) => beginGame(level, "classic", null);
-  const startDaily = (date = todayKey()) => beginGame("clever", "daily", date);
+  // The daily challenge can only be played once per day: if it's already been finished, jump
+  // straight to the results instead of letting the board reset for another attempt.
+  const startDaily = (date = todayKey()) => {
+    const existing = loadDailyResult(date);
+    if (existing) {
+      setGameId(`daily-${date}`);
+      setDifficulty("clever");
+      setMode("daily");
+      setDailyDate(date);
+      setLetters(existing.letters);
+      setOwners(existing.owners);
+      setPlayed(existing.played);
+      setSelected([]);
+      setTurn("done");
+      setMessage(existing.message);
+      setWordError("");
+      setDailyStanding(null);
+      setShareStatus("");
+      setDefinition(null);
+      setScreen("game");
+      setResultsOpen(true);
+      return;
+    }
+    beginGame("clever", "daily", date);
+  };
 
   const applyClaim = useCallback((tileIds: number[], owner: 1 | 2, source: Owner[]) => {
     return claimTiles(tileIds, owner, source);
@@ -800,11 +947,11 @@ export default function Home() {
     celebrateClaim(move.ids, sourceOwners, nextOwners, 2);
     setOwners(nextOwners);
     setPlayed(nextPlayed);
-    const filled = nextOwners.every(Boolean);
-    setTurn(filled ? "done" : "you");
-    setMessage(filled ? (nextOwners.filter(o=>o===1).length > nextOwners.filter(o=>o===2).length ? "You encircled the board!" : "Every circle is claimed") : `${LABELS[difficulty].name} played ${move.word.toUpperCase()}`);
-    if (filled) {
-      if (mode === "daily" && dailyDate) window.localStorage.setItem(`gridlock-daily-${dailyDate}`, "complete");
+    const decided = decidedOutcome(nextOwners);
+    setTurn(decided ? "done" : "you");
+    setMessage(decided ? describeOutcome(nextOwners, difficulty) : `${LABELS[difficulty].name} played ${move.word.toUpperCase()}`);
+    if (decided) {
+      if (mode === "daily" && dailyDate) saveDailyResult(dailyDate, { letters, owners: nextOwners, played: nextPlayed, message: describeOutcome(nextOwners, difficulty) });
       window.setTimeout(() => setResultsOpen(true), WIN_MESSAGE_HOLD_MS);
     }
   }, [celebrateClaim, dailyDate, difficulty, letters, mode]);
@@ -812,7 +959,8 @@ export default function Home() {
   const submit = async () => {
     if (turn !== "you") return;
     if (currentWord.length < 2) { setWordError("Choose at least 2 letters"); return; }
-    if (blocksPlayedWord(currentWord, played.map(play => play.word))) { setWordError("That word, or a longer form of it, has already been played"); return; }
+    const blockingWord = findBlockingPlayedWord(currentWord, played.map(play => play.word));
+    if (blockingWord) { setWordError(`${blockingWord.toUpperCase()} has already been played`); return; }
     setValidating(true);
     let valid = CLIENT_SUPPLEMENTAL_WORDS.has(currentWord);
     if (!valid) {
@@ -848,10 +996,12 @@ export default function Home() {
     setPlayed(nextPlayed);
     setSelected([]);
     setWordError("");
-    if (nextOwners.every(Boolean)) {
+    const decided = decidedOutcome(nextOwners);
+    if (decided) {
       setTurn("done");
-      setMessage(nextOwners.filter(o=>o===1).length > nextOwners.filter(o=>o===2).length ? "You encircled the board!" : "Every circle is claimed");
-      if (mode === "daily" && dailyDate) window.localStorage.setItem(`gridlock-daily-${dailyDate}`, "complete");
+      const finishedMessage = describeOutcome(nextOwners, difficulty);
+      setMessage(finishedMessage);
+      if (mode === "daily" && dailyDate) saveDailyResult(dailyDate, { letters, owners: nextOwners, played: nextPlayed, message: finishedMessage });
       window.setTimeout(() => setResultsOpen(true), WIN_MESSAGE_HOLD_MS);
       return;
     }
@@ -952,13 +1102,13 @@ export default function Home() {
         <h1>ENCIRCLE</h1>
         <p className="lede">Find words. Claim circles.<br/>Surround letters to make them yours for good.</p>
       </section>
-      <button aria-label={dailyCompleted ? "Replay today’s daily challenge" : "Play today’s daily challenge"} className="daily-feature" onClick={() => startDaily()} type="button">
+      <button aria-label={dailyCompleted ? "View today’s daily challenge results" : "Play today’s daily challenge"} className="daily-feature" onClick={() => startDaily()} type="button">
         <span className="daily-preview-grid" aria-hidden="true">
           {dailyPreviewLetters.map((letter, i) => <span className={i === 0 || i === 1 || i === 6 ? "preview-own" : i === 23 || i === 28 || i === 29 ? "preview-rival" : ""} key={i}>{letter}</span>)}
         </span>
         <span className="daily-feature-copy">
           <small>Today’s circles · {new Date().toLocaleDateString(undefined, { month: "short", day: "numeric" })}</small>
-          <strong>{dailyCompleted ? "Replay today’s challenge" : "Play today’s challenge"}</strong>
+          <strong>{dailyCompleted ? "View today’s results" : "Play today’s challenge"}</strong>
           <b>Same board for everyone</b>
           <i>→</i>
         </span>
