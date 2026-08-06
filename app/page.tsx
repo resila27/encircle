@@ -317,25 +317,16 @@ export function claimTiles(tileIds: number[], owner: 1 | 2, source: Owner[]) {
   return next;
 }
 
-// Returns "you" | "rival" | "tie" once the outcome is locked in, or null while it's still contested.
-// Crucially, only LOCKED tiles are actually safe from here on — an unlocked tile, even one you
-// currently own, can still be stolen back with the right word, exactly like a blank can still be
-// claimed. So a player's guaranteed final score is their locked-tile count, and the other player's
-// realistic ceiling is "every tile not locked against them" (their own tiles, blanks, and any of the
-// leader's unlocked tiles). Only end the game early when even that ceiling can't catch the leader —
-// otherwise keep playing until every tile is spoken for.
+// Returns "you" | "rival" | "tie" once the game is over, or null while it's still going. The game
+// is never over while any tile is unclaimed — deciding *when* to spend your remaining tiles/words
+// is the whole strategic tension of ENCIRCLE, so an early call based on "the score can't change
+// anymore" would cut that off. The only thing this function is for is reading the final tally once
+// every one of the 30 tiles has an owner.
 export function decidedOutcome(owners: Owner[]): "you" | "rival" | "tie" | null {
+  if (!owners.every(Boolean)) return null;
   const you = owners.filter(o => o === 1).length;
   const rival = owners.filter(o => o === 2).length;
-  const blanks = owners.length - you - rival;
-  if (blanks === 0) return you > rival ? "you" : rival > you ? "rival" : "tie";
-  const total = owners.length;
-  const locked = protectedTiles(owners);
-  const youLocked = owners.reduce<number>((n, o, i) => n + (o === 1 && locked[i] ? 1 : 0), 0);
-  const rivalLocked = owners.reduce<number>((n, o, i) => n + (o === 2 && locked[i] ? 1 : 0), 0);
-  if (youLocked > total - youLocked) return "you";
-  if (rivalLocked > total - rivalLocked) return "rival";
-  return null;
+  return you > rival ? "you" : rival > you ? "rival" : "tie";
 }
 
 function boardDistance(left: number, right: number) {
@@ -547,17 +538,19 @@ export function selectRivalMove(sourceOwners: Owner[], sourcePlayed: PlayedWord[
   const availableCandidates = BOT_WORDS.filter(word => word.length >= minLength && word.length <= dynamicMax && !blocksPlayedWord(word, usedWords) && (difficulty === "fierce" || !COMPOUND_WORD_SET.has(word) || compoundWordsPlayed < MAX_NON_FIERCE_COMPOUND_WORDS) && canForm(word, letters));
 
   if (blanks > 0) {
+    // decidedOutcome only returns non-null once every tile is claimed, so this only matches a word
+    // that uses up every remaining blank in one move AND leaves the rival ahead — a genuine game-
+    // ending finisher, not just a strong move. Among several such finishers, prefer the longer word
+    // since it locks in more ground along the way.
     const finishers = availableCandidates
       .map(word => {
         const ids = chooseFinishingTiles(word, letters, sourceOwners);
         if (!ids) return null;
         const nextOwners = claimTiles(ids, 2, sourceOwners);
-        return decidedOutcome(nextOwners) === "rival" ? { word, ids, nextOwners, remainingBlanks: nextOwners.filter(o => o === 0).length } : null;
+        return decidedOutcome(nextOwners) === "rival" ? { word, ids, nextOwners } : null;
       })
-      .filter((entry): entry is { word: string; ids: number[]; nextOwners: Owner[]; remainingBlanks: number } => entry !== null)
-      // Prefer the move that closes the game out soonest (fewest circles left undecided);
-      // among ties, take the longer word since it locks in more ground along the way.
-      .sort((a, b) => a.remainingBlanks - b.remainingBlanks || b.word.length - a.word.length);
+      .filter((entry): entry is { word: string; ids: number[]; nextOwners: Owner[] } => entry !== null)
+      .sort((a, b) => b.word.length - a.word.length);
     const finisher = finishers[0];
     if (finisher) {
       const { word, ids, nextOwners } = finisher;
@@ -608,15 +601,13 @@ const LABELS: Record<Difficulty, { name: string; note: string; face: string }> =
   fierce: { name: "Fierce", note: "Can you keep up?", face: "◉‿◉" },
 };
 
-// The game can end before every tile is filled once the outcome is truly locked in (see decidedOutcome).
+// Only called once decidedOutcome has confirmed every tile is claimed (see decidedOutcome).
 function describeOutcome(finalOwners: Owner[], difficulty: Difficulty) {
-  const filled = finalOwners.every(Boolean);
   const you = finalOwners.filter(o => o === 1).length;
   const rival = finalOwners.filter(o => o === 2).length;
-  if (filled) return you > rival ? "You encircled the board!" : "Every tile is claimed";
-  if (you > rival) return "You’ve locked in the win — no comeback possible.";
-  if (rival > you) return `${LABELS[difficulty].name} has locked in the win.`;
-  return "The outcome is settled.";
+  if (you > rival) return "You encircled the board!";
+  if (rival > you) return `${LABELS[difficulty].name} encircled the board.`;
+  return "Every tile is claimed — it's a tie.";
 }
 
 type DailyResult = { letters: string[]; owners: Owner[]; played: PlayedWord[]; message: string };
