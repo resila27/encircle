@@ -607,12 +607,14 @@ const LABELS: Record<Difficulty, { name: string; note: string; face: string }> =
 };
 
 // Only called once decidedOutcome has confirmed every tile is claimed (see decidedOutcome).
-function describeOutcome(finalOwners: Owner[], difficulty: Difficulty) {
+// winningWord is the word that completed the board — the deciding play of the game.
+function describeOutcome(finalOwners: Owner[], difficulty: Difficulty, winningWord: string) {
   const you = finalOwners.filter(o => o === 1).length;
   const rival = finalOwners.filter(o => o === 2).length;
-  if (you > rival) return "You encircled the board!";
-  if (rival > you) return `${LABELS[difficulty].name} encircled the board.`;
-  return "Every tile is claimed — it's a tie.";
+  const word = winningWord.toUpperCase();
+  if (you > rival) return `You encircled the board with ${word}!`;
+  if (rival > you) return `${LABELS[difficulty].name} encircled the board with ${word}.`;
+  return `Every tile is claimed — it's a tie. Final word: ${word}.`;
 }
 
 type DailyResult = { letters: string[]; owners: Owner[]; played: PlayedWord[]; message: string };
@@ -1039,9 +1041,9 @@ export default function Home() {
     setPlayed(nextPlayed);
     const decided = decidedOutcome(nextOwners);
     setTurn(decided ? "done" : "you");
-    setMessage(decided ? describeOutcome(nextOwners, difficulty) : `${LABELS[difficulty].name} played ${move.word.toUpperCase()}`);
+    setMessage(decided ? describeOutcome(nextOwners, difficulty, move.word) : `${LABELS[difficulty].name} played ${move.word.toUpperCase()}`);
     if (decided) {
-      if (mode === "daily" && dailyDate) saveDailyResult(dailyDate, { letters, owners: nextOwners, played: nextPlayed, message: describeOutcome(nextOwners, difficulty) });
+      if (mode === "daily" && dailyDate) saveDailyResult(dailyDate, { letters, owners: nextOwners, played: nextPlayed, message: describeOutcome(nextOwners, difficulty, move.word) });
       window.setTimeout(() => setResultsOpen(true), WIN_MESSAGE_HOLD_MS);
     }
   }, [celebrateClaim, dailyDate, difficulty, letters, mode]);
@@ -1089,7 +1091,7 @@ export default function Home() {
     const decided = decidedOutcome(nextOwners);
     if (decided) {
       setTurn("done");
-      const finishedMessage = describeOutcome(nextOwners, difficulty);
+      const finishedMessage = describeOutcome(nextOwners, difficulty, currentWord);
       setMessage(finishedMessage);
       if (mode === "daily" && dailyDate) saveDailyResult(dailyDate, { letters, owners: nextOwners, played: nextPlayed, message: finishedMessage });
       window.setTimeout(() => setResultsOpen(true), WIN_MESSAGE_HOLD_MS);
