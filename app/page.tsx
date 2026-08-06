@@ -288,6 +288,11 @@ function calendarDays(value: string) {
   ];
 }
 
+// Bump this whenever the letter-drawing algorithm changes in a way that should reroll every daily
+// board (past and present) onto the new, fairer distribution — every player still gets the same
+// board for a given date, this just changes which board that is.
+const DAILY_BOARD_VERSION = "v2";
+
 function seededLetters(seed: string) {
   let state = [...seed].reduce((hash, char) => Math.imul(hash ^ char.charCodeAt(0), 16777619), 2166136261) >>> 0;
   const random = () => {
@@ -862,7 +867,7 @@ export default function Home() {
   // Trust the saved results snapshot itself, not just the old completion flag — a stale flag with
   // no snapshot behind it (e.g. from before this check existed) should offer a fresh game, not a broken "results" link.
   const dailyCompleted = typeof window !== "undefined" && loadDailyResult(todayKey()) !== null;
-  const dailyPreviewLetters = useMemo(() => seededLetters(`GRIDLOCK-${todayKey()}`), []);
+  const dailyPreviewLetters = useMemo(() => seededLetters(`GRIDLOCK-${DAILY_BOARD_VERSION}-${todayKey()}`), []);
   const archiveDates = useMemo(() => calendarDays(archiveMonth), [archiveMonth]);
   const archiveMonthName = useMemo(() => {
     const [year, month] = archiveMonth.split("-").map(Number);
@@ -979,7 +984,7 @@ export default function Home() {
     setDifficulty(level);
     setMode(nextMode);
     setDailyDate(date);
-    setLetters(nextMode === "daily" && date ? seededLetters(`GRIDLOCK-${date}`) : shuffledLetters());
+    setLetters(nextMode === "daily" && date ? seededLetters(`GRIDLOCK-${DAILY_BOARD_VERSION}-${date}`) : shuffledLetters());
     setOwners(Array(BOARD_SIZE).fill(0));
     setSelected([]);
     setPlayed([]);
