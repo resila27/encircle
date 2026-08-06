@@ -1,5 +1,6 @@
 // Familiar compounds and extended forms used by the stronger ENCIRCLE rivals.
-// They remain separate so Clever can use extensions freely but only one compound per game.
+// They remain separate so Clever (and Relaxed) can use extensions freely but only up to two
+// compound words per game (see MAX_NON_FIERCE_COMPOUND_WORDS in page.tsx).
 export const COMPOUND_WORDS = `
 aircraft airplane airport backbone background backyard ballgame barefoot bathroom bedroom birthday blackbird blackout bookshelf brainstorm breakfast butterfly campground carpool catfish classroom coastline cookbook daylight dishwasher doorway downstairs driveway earphone earthquake evergreen everybody everyday everyone everything farmhouse fireplace firehouse football forecast forever friendship grandfather grandmother greenhouse haircut hallway handbook headlight heartbeat highway homework honeymoon horseplay horsepower houseboat household houseplant keyboard landmark lifetime lighthouse mailbox moonlight motorcycle newspaper nightclub nightmare nobody notebook outcome outdoors pancake playground playtime popcorn rainbow railroad raindrop rainfall raincoat rattlesnake roommate sailboat schoolhouse schoolmate seafood shipyard shoelace shortcut skateboard snowfall snowman someday somehow someone something soundtrack spaceship stairway starfish steamboat sunrise sunset sunshine tabletop teacup toothbrush toothpaste touchscreen townhouse underground upstairs waterfall weekend wheelchair wildfire wildlife windmill workbook workplace worldwide yourself
 `.trim().split(/\s+/);

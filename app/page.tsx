@@ -56,6 +56,7 @@ yard year yellow yes yet you young your
 const BOT_WORDS = [...new Set([...WORDS, ...STRATEGY_WORDS])];
 const POWER_WORD_SET = new Set(STRATEGY_WORDS);
 const COMPOUND_WORD_SET = new Set(COMPOUND_WORDS);
+const MAX_NON_FIERCE_COMPOUND_WORDS = 2;
 const EXTENDED_WORD_SET = new Set(EXTENDED_WORDS);
 const CLIENT_SUPPLEMENTAL_WORDS = new Set([
   "motherboard", "motherboards", "masturbated",
@@ -165,20 +166,71 @@ const LETTER_WEIGHTS: Record<string, number> = {
 };
 const LETTER_POOL = Object.entries(LETTER_WEIGHTS).flatMap(([letter, weight]) => Array(weight).fill(letter));
 const VOWELS = new Set(["A", "E", "I", "O", "U"]);
+// A pure weighted draw lands around 41% vowels on average (and drifts well above that on bad luck —
+// boards with 14+ vowels out of 30 make the game too easy, since tiles don't need to be adjacent to
+// combine into a word). Keep every board in a healthier, still-flexible range instead.
 const MIN_BOARD_VOWELS = 9;
+const MAX_BOARD_VOWELS = 12;
+// No single letter should flood the board (a board with four Ns is a bad-luck dead board, not a
+// balanced one).
+const MAX_LETTER_REPEATS = 3;
+// The six tiles ringing the center (indices 1..BOARD_RING_COUNTS[1]) need a couple of vowels of
+// their own so locking the center — which requires owning all six — stays realistic for an average
+// player. A single guaranteed vowel still leaves five consonants that can only ever pair with
+// vowels from elsewhere on the board, so one unlucky draw (rare letters landing next to each other)
+// can make the ring practically impossible to complete quickly; two vowels gives enough internal
+// combinations that a short word inside the ring itself is almost always available.
+const RING1_TILES = Array.from({ length: BOARD_RING_COUNTS[1] }, (_, i) => i + 1);
+const MIN_RING1_VOWELS = 2;
 
-// Draws a fresh random set of 30 letters (not just a reshuffle of a fixed set), with enough vowels
-// to keep the board playable. `random` is injected so the daily challenge can use a seeded version.
+// Draws a fresh random set of 30 letters (not just a reshuffle of a fixed set), balanced so the
+// board stays playable. `random` is injected so the daily challenge can use a seeded version.
 function drawLetters(random: () => number, count = BOARD_SIZE) {
   const letters = Array.from({ length: count }, () => LETTER_POOL[Math.floor(random() * LETTER_POOL.length)]);
+  const isVowel = (letter: string) => VOWELS.has(letter);
+  const vowelPool = ["A", "E", "I", "O", "U"];
+  const consonantPool = Object.keys(LETTER_WEIGHTS).filter(letter => !VOWELS.has(letter));
+
   let guard = 0;
-  while (letters.filter(letter => VOWELS.has(letter)).length < MIN_BOARD_VOWELS && guard < 200) {
-    const consonantIndexes = letters.map((letter, i) => VOWELS.has(letter) ? -1 : i).filter(i => i >= 0);
+  while (letters.filter(isVowel).length < MIN_BOARD_VOWELS && guard < 200) {
+    const consonantIndexes = letters.map((letter, i) => isVowel(letter) ? -1 : i).filter(i => i >= 0);
     if (!consonantIndexes.length) break;
-    const vowelPool = ["A", "E", "I", "O", "U"];
     letters[consonantIndexes[Math.floor(random() * consonantIndexes.length)]] = vowelPool[Math.floor(random() * vowelPool.length)];
     guard++;
   }
+  guard = 0;
+  while (letters.filter(isVowel).length > MAX_BOARD_VOWELS && guard < 200) {
+    const vowelIndexes = letters.map((letter, i) => isVowel(letter) ? i : -1).filter(i => i >= 0);
+    if (!vowelIndexes.length) break;
+    letters[vowelIndexes[Math.floor(random() * vowelIndexes.length)]] = consonantPool[Math.floor(random() * consonantPool.length)];
+    guard++;
+  }
+
+  guard = 0;
+  while (guard < 400) {
+    const byLetter = new Map<string, number[]>();
+    letters.forEach((letter, i) => byLetter.set(letter, [...(byLetter.get(letter) ?? []), i]));
+    const offender = [...byLetter.entries()].find(([, indexes]) => indexes.length > MAX_LETTER_REPEATS);
+    if (!offender) break;
+    const [letter, indexes] = offender;
+    const replacementPool = (isVowel(letter) ? vowelPool : consonantPool).filter(candidate => candidate !== letter);
+    letters[indexes[Math.floor(random() * indexes.length)]] = replacementPool[Math.floor(random() * replacementPool.length)];
+    guard++;
+  }
+
+  // Relocate vowels from elsewhere on the board into the ring — a straight swap, so it never
+  // disturbs the overall vowel count or the duplicate-letter caps enforced above.
+  guard = 0;
+  while (RING1_TILES.filter(i => isVowel(letters[i])).length < MIN_RING1_VOWELS && guard < 30) {
+    const ring1Consonants = RING1_TILES.filter(i => !isVowel(letters[i]));
+    const outsideVowels = letters.map((letter, i) => (!RING1_TILES.includes(i) && isVowel(letter)) ? i : -1).filter(i => i >= 0);
+    if (!ring1Consonants.length || !outsideVowels.length) break;
+    const from = ring1Consonants[Math.floor(random() * ring1Consonants.length)];
+    const to = outsideVowels[Math.floor(random() * outsideVowels.length)];
+    [letters[from], letters[to]] = [letters[to], letters[from]];
+    guard++;
+  }
+
   return letters;
 }
 
@@ -266,15 +318,23 @@ export function claimTiles(tileIds: number[], owner: 1 | 2, source: Owner[]) {
 }
 
 // Returns "you" | "rival" | "tie" once the outcome is locked in, or null while it's still contested.
-// The board doesn't need to fill completely: once the remaining blanks can no longer change who's
-// ahead, the game is decided and should end right there instead of playing out every last circle.
+// Crucially, only LOCKED tiles are actually safe from here on — an unlocked tile, even one you
+// currently own, can still be stolen back with the right word, exactly like a blank can still be
+// claimed. So a player's guaranteed final score is their locked-tile count, and the other player's
+// realistic ceiling is "every tile not locked against them" (their own tiles, blanks, and any of the
+// leader's unlocked tiles). Only end the game early when even that ceiling can't catch the leader —
+// otherwise keep playing until every tile is spoken for.
 export function decidedOutcome(owners: Owner[]): "you" | "rival" | "tie" | null {
   const you = owners.filter(o => o === 1).length;
   const rival = owners.filter(o => o === 2).length;
   const blanks = owners.length - you - rival;
   if (blanks === 0) return you > rival ? "you" : rival > you ? "rival" : "tie";
-  if (you > rival + blanks) return "you";
-  if (rival > you + blanks) return "rival";
+  const total = owners.length;
+  const locked = protectedTiles(owners);
+  const youLocked = owners.reduce<number>((n, o, i) => n + (o === 1 && locked[i] ? 1 : 0), 0);
+  const rivalLocked = owners.reduce<number>((n, o, i) => n + (o === 2 && locked[i] ? 1 : 0), 0);
+  if (youLocked > total - youLocked) return "you";
+  if (rivalLocked > total - rivalLocked) return "rival";
   return null;
 }
 
@@ -477,12 +537,14 @@ function bestReplySwing(source: Owner[], letters: string[], usedWords: Set<strin
 
 export function selectRivalMove(sourceOwners: Owner[], sourcePlayed: PlayedWord[], letters: string[], difficulty: Difficulty, deterministic = false) {
   const usedWords = new Set(sourcePlayed.map(play => play.word));
-  const compoundAlreadyPlayed = sourcePlayed.some(play => play.owner === 2 && COMPOUND_WORD_SET.has(play.word));
+  // Compounds (WORDPLAY-style) are capped per game so the rival doesn't lean on them every turn;
+  // prefixes, suffixes, and plurals (EXTENDED_WORD_SET) stay unrestricted at every difficulty.
+  const compoundWordsPlayed = sourcePlayed.filter(play => play.owner === 2 && COMPOUND_WORD_SET.has(play.word)).length;
   const blanks = sourceOwners.filter(owner => owner === 0).length;
   const maxLength = difficulty === "fierce" ? 15 : difficulty === "clever" ? 10 : 6;
   const minLength = blanks <= 8 ? 2 : 3;
   const dynamicMax = Math.max(minLength, maxLength);
-  const availableCandidates = BOT_WORDS.filter(word => word.length >= minLength && word.length <= dynamicMax && !blocksPlayedWord(word, usedWords) && (difficulty === "fierce" || !COMPOUND_WORD_SET.has(word) || !compoundAlreadyPlayed) && canForm(word, letters));
+  const availableCandidates = BOT_WORDS.filter(word => word.length >= minLength && word.length <= dynamicMax && !blocksPlayedWord(word, usedWords) && (difficulty === "fierce" || !COMPOUND_WORD_SET.has(word) || compoundWordsPlayed < MAX_NON_FIERCE_COMPOUND_WORDS) && canForm(word, letters));
 
   if (blanks > 0) {
     const finishers = availableCandidates
@@ -546,7 +608,7 @@ const LABELS: Record<Difficulty, { name: string; note: string; face: string }> =
   fierce: { name: "Fierce", note: "Can you keep up?", face: "◉‿◉" },
 };
 
-// The game can end before every circle is filled once the outcome is locked in (see decidedOutcome).
+// The game can end before every tile is filled once the outcome is truly locked in (see decidedOutcome).
 function describeOutcome(finalOwners: Owner[], difficulty: Difficulty) {
   const filled = finalOwners.every(Boolean);
   const you = finalOwners.filter(o => o === 1).length;
