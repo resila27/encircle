@@ -1138,7 +1138,7 @@ export default function Home() {
       return ring;
     }).join("\n");
     const heading = mode === "daily" && dailyDate ? `ENCIRCLE Daily ${dailyDate}` : `ENCIRCLE vs ${LABELS[difficulty].name}`;
-    const text = `${heading}\n${yourScore}–${rivalScore} ${result === "win" ? "Win" : result === "loss" ? "Loss" : "Tie"}\n${circles}\n${longestWord ? `Best word: ${longestWord.toUpperCase()}\n` : ""}https://beta.gridlockword.com`;
+    const text = `${heading}\n${yourScore}–${rivalScore} ${result === "win" ? "Win" : result === "loss" ? "Loss" : "Tie"}\n${circles}\n${longestWord ? `Best word: ${longestWord.toUpperCase()}\n` : ""}https://playencircle.com`;
     const canShare = typeof navigator.share === "function";
     try {
       if (canShare) await navigator.share({ text, title: "My ENCIRCLE result" });
@@ -1365,7 +1365,7 @@ export default function Home() {
           <div className="result-highlights">
             <div><span>Best word</span><button title={longestWord.toUpperCase()} type="button" onClick={() => longestWord && void lookUpWord(longestWord)}>{longestWord ? longestWord.toUpperCase() : "—"}</button></div>
             <div><span>Biggest steal</span><strong>{biggestSteal}</strong></div>
-            {mode === "daily" && <div><span>Daily standing</span><strong>{dailyStanding ? `#${dailyStanding.rank} of ${dailyStanding.total}` : account ? "Calculating…" : "Sign in"}</strong></div>}
+            {mode === "daily" && <div><span>Daily standing</span>{dailyStanding ? <strong>{`#${dailyStanding.rank} of ${dailyStanding.total}`}</strong> : account ? <strong>Calculating…</strong> : <button className="daily-standing-signin" onClick={() => setAccountOpen(true)} type="button">Sign in</button>}</div>}
           </div>
           {dailyStanding && <p className="percentile">Top {dailyStanding.percentile}% today</p>}
           <button className="primary share-result" onClick={() => void shareResult()} type="button">{shareStatus || "Share result"}</button>

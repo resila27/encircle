@@ -17,21 +17,13 @@ Locking the center circle (tile index 0) currently has no special reward beyond 
 - Also still open: should there be an additional flat point bonus for locking the center, on top
   of the joker utility? Decide when building this.
 
-## Known follow-up: GitHub Actions auto-deploy targets the wrong DreamHost account
+## Resolved: GitHub Actions was deploying to the wrong DreamHost account
 
-`.github/workflows/deploy-playencircle.yml` currently guesses at 8 possible folder paths under the
-`dh_cwxxe8` DreamHost user. The real live site for playencircle.com is actually served from the
-`dh_wy8a2d` account (`/home/dh_wy8a2d/playencircle.com/`). Every push still auto-deploys to the
-wrong account harmlessly; getting the real site updated currently requires a manual step:
-
-1. Let the GitHub Action build and push to `dh_cwxxe8` (wrong account, harmless).
-2. Pull the freshly-built files down from `dh_cwxxe8` to a local temp folder, then push them up to
-   `dh_wy8a2d` (both `/home/dh_wy8a2d/playencircle.com/` and `.../playencircle.com/public/`).
-
-Proper fix: update the `DREAMHOST_USER`/`DREAMHOST_HOST`/`DREAMHOST_SSH_KEY` GitHub secrets to the
-correct account and key (a working passwordless key for `dh_wy8a2d` already exists locally at
-`/Users/dki/Documents/Codex/Gridlock/deploy/encircle-deploy-key`, already added to that account's
-`authorized_keys`), then simplify the workflow to deploy to that one real path instead of guessing.
+Fixed 2026-08-06: the `DREAMHOST_USER`/`DREAMHOST_HOST`/`DREAMHOST_SSH_KEY` GitHub secrets were
+updated to point at the correct `dh_wy8a2d` account. Auto-deploy on push to `beta/5x6-circles`
+should now reach the real playencircle.com directly — no manual pull/push step needed anymore.
+(The workflow still probes several candidate paths/accounts as a fallback; that's harmless but
+could be simplified now that the right account is confirmed working.)
 
 ## Also mentioned, not yet scheduled
 
