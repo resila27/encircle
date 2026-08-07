@@ -569,10 +569,14 @@ export function selectRivalMove(sourceOwners: Owner[], sourcePlayed: PlayedWord[
     // right past a real finishing word just because that word wasn't in its curated list. Once the
     // board is down to a handful of blanks, also check the full dictionary (loaded once and cached
     // — see loadFullDictionary above) so it works as hard as a human would to close the game out.
-    const finisherPool = blanks <= 12 && dictionaryWords?.length
+    // Relaxed stays on its small curated list here on purpose — it's meant to be the easy/beginner
+    // difficulty, and letting it reach into a 200k+ word dictionary for a closing move (e.g. an
+    // obscure 13-letter finisher) defeats the point of "relaxed." Word length also stays capped at
+    // dynamicMax so a widened finisher search can't hand Clever a Fierce-length word either.
+    const finisherPool = blanks <= 12 && difficulty !== "relaxed" && dictionaryWords?.length
       ? [...new Set([
           ...availableCandidates,
-          ...dictionaryWords.filter(word => word.length >= minLength && word.length <= 15 && !blocksPlayedWord(word, usedWords) && canForm(word, letters)),
+          ...dictionaryWords.filter(word => word.length >= minLength && word.length <= dynamicMax && !blocksPlayedWord(word, usedWords) && canForm(word, letters)),
         ])]
       : availableCandidates;
     const finishers = finisherPool
