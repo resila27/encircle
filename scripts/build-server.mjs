@@ -15,6 +15,14 @@ const strategyEncoded = [...strategySource.matchAll(/`([\s\S]*?)`\.trim\(\)\.spl
 if (!strategyEncoded) throw new Error("ENCIRCLE strategy dictionary could not be read.");
 const wiktionaryWords = JSON.parse(await readFile(path.join(root, "data", "wiktionary-words.json"), "utf8"));
 if (!Array.isArray(wiktionaryWords) || wiktionaryWords.length < 30000) throw new Error("ENCIRCLE Wiktionary data is unexpectedly small.");
+// ENABLE1 (Enhanced North American Benchmark LExicon) is the standard public-domain word-game
+// dictionary — curated specifically to exclude offensive terms, which is why it's the usual choice
+// for Scrabble-style apps. app/word-list.ts and the Wiktionary extract both have real gaps (entire
+// missing letter sections, common words like "wordless" absent), so this fills those in wholesale
+// instead of patching one missing word at a time forever.
+const enable1Text = await readFile(path.join(root, "data", "enable1-additions.txt"), "utf8");
+const enable1Words = enable1Text.split("\n").map(line => line.trim()).filter(Boolean);
+if (enable1Words.length < 100000) throw new Error("ENCIRCLE ENABLE1 word list is unexpectedly small.");
 const supplementalWords = [
   "motherboard", "motherboards",
   "release",
@@ -25,8 +33,8 @@ const supplementalWords = [
   "wordless", "wordlessly", "wordlessness",
   "longshot", "longshots",
 ];
-const words = [...new Set([...JSON.parse(encoded), ...wiktionaryWords, ...clientEncoded.trim().split(/\s+/), ...strategyEncoded.trim().split(/\s+/), ...supplementalWords])].sort();
-if (!Array.isArray(words) || words.length < 50000) throw new Error("ENCIRCLE dictionary is unexpectedly small.");
+const words = [...new Set([...JSON.parse(encoded), ...wiktionaryWords, ...enable1Words, ...clientEncoded.trim().split(/\s+/), ...strategyEncoded.trim().split(/\s+/), ...supplementalWords])].sort();
+if (!Array.isArray(words) || words.length < 200000) throw new Error("ENCIRCLE dictionary is unexpectedly small.");
 
 await mkdir(path.join(output, "data"), { recursive: true });
 await cp(path.join(root, "server", "api"), output, { recursive: true });
