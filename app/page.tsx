@@ -157,23 +157,20 @@ const TILE_NEIGHBORS = computeTileNeighbors(BOARD_LAYOUT);
 const OUTER_MIN_NEIGHBORS = Math.min(...OUTER_TILES.map(index => TILE_NEIGHBORS[index].length));
 const RING_ANCHORS = OUTER_TILES.filter(index => TILE_NEIGHBORS[index].length === OUTER_MIN_NEIGHBORS);
 
-// Roughly Scrabble-like English letter frequencies, tuned so games stay easy to form words from
-// (a healthy share of common vowels/consonants, rare letters like Q/X/Z/J appear only occasionally).
-const LETTER_WEIGHTS: Record<string, number> = {
-  A: 9, B: 2, C: 3, D: 4, E: 12, F: 2, G: 3, H: 3, I: 9, J: 1,
-  K: 1, L: 4, M: 3, N: 6, O: 8, P: 2, Q: 1, R: 6, S: 6, T: 6,
-  U: 4, V: 1, W: 2, X: 1, Y: 2, Z: 1,
-};
-const LETTER_POOL = Object.entries(LETTER_WEIGHTS).flatMap(([letter, weight]) => Array(weight).fill(letter));
+// Fixed-composition letter bag (replaces the old pure-weighted draw, which drifted too far from
+// board to board — anywhere from 6 to 15+ vowels, letters like Q/X/Z sometimes doubling up).
+//   - A/E/I/O/U: exactly 2 of each (10 tiles).
+//   - S/T/R/N/G/L/D/C/M: exactly 1 of each (9 tiles) — a dependable core of common consonants.
+//   - The remaining 11 tiles come from the rest of the alphabet (B F H J K P Q V W X Y Z), each
+//     appearing at most once. Fierce draws 11 of those 12 (including J/Q/X/Z), leaving one out at
+//     random each game. Relaxed, Clever, and the Daily challenge exclude J/Q/X/Z entirely — since
+//     that only leaves 8 unique letters for 11 slots, 3 of those 8 get a second copy instead.
 const VOWELS = new Set(["A", "E", "I", "O", "U"]);
-// A pure weighted draw lands around 41% vowels on average (and drifts well above that on bad luck —
-// boards with 14+ vowels out of 30 make the game too easy, since tiles don't need to be adjacent to
-// combine into a word). Keep every board in a healthier, still-flexible range instead.
-const MIN_BOARD_VOWELS = 9;
-const MAX_BOARD_VOWELS = 12;
-// No single letter should flood the board (a board with four Ns is a bad-luck dead board, not a
-// balanced one).
-const MAX_LETTER_REPEATS = 3;
+const GUARANTEED_VOWELS = ["A", "E", "I", "O", "U"];
+const GUARANTEED_SINGLES = ["S", "T", "R", "N", "G", "L", "D", "C", "M"];
+const RARE_LETTERS = ["B", "F", "H", "J", "K", "P", "Q", "V", "W", "X", "Y", "Z"];
+const RARE_LETTERS_SAFE = RARE_LETTERS.filter(letter => !["J", "Q", "X", "Z"].includes(letter));
+const RARE_SLOT_COUNT = BOARD_SIZE - GUARANTEED_VOWELS.length * 2 - GUARANTEED_SINGLES.length;
 // The six tiles ringing the center (indices 1..BOARD_RING_COUNTS[1]) need a couple of vowels of
 // their own so locking the center — which requires owning all six — stays realistic for an average
 // player. A single guaranteed vowel still leaves five consonants that can only ever pair with
@@ -183,44 +180,37 @@ const MAX_LETTER_REPEATS = 3;
 const RING1_TILES = Array.from({ length: BOARD_RING_COUNTS[1] }, (_, i) => i + 1);
 const MIN_RING1_VOWELS = 2;
 
-// Draws a fresh random set of 30 letters (not just a reshuffle of a fixed set), balanced so the
-// board stays playable. `random` is injected so the daily challenge can use a seeded version.
-function drawLetters(random: () => number, count = BOARD_SIZE) {
-  const letters = Array.from({ length: count }, () => LETTER_POOL[Math.floor(random() * LETTER_POOL.length)]);
+function shuffleWith<T>(random: () => number, values: T[]) {
+  const result = [...values];
+  for (let i = result.length - 1; i > 0; i--) {
+    const j = Math.floor(random() * (i + 1));
+    [result[i], result[j]] = [result[j], result[i]];
+  }
+  return result;
+}
+
+// Draws a fresh random set of 30 letters (not just a reshuffle of a fixed set) from the fixed-
+// composition bag above. `random` is injected so the daily challenge can use a seeded version.
+// `allowRareQuad` opens up J/Q/X/Z — true only for Fierce; Relaxed, Clever, and the Daily
+// challenge always stay in the safer range (see seededLetters).
+function drawLetters(random: () => number, allowRareQuad: boolean) {
+  const bag: string[] = [];
+  GUARANTEED_VOWELS.forEach(letter => bag.push(letter, letter));
+  GUARANTEED_SINGLES.forEach(letter => bag.push(letter));
+  if (allowRareQuad) {
+    bag.push(...shuffleWith(random, RARE_LETTERS).slice(0, RARE_SLOT_COUNT));
+  } else {
+    bag.push(...RARE_LETTERS_SAFE);
+    const extra = Math.max(0, RARE_SLOT_COUNT - RARE_LETTERS_SAFE.length);
+    bag.push(...shuffleWith(random, RARE_LETTERS_SAFE).slice(0, extra));
+  }
+
+  const letters = shuffleWith(random, bag);
   const isVowel = (letter: string) => VOWELS.has(letter);
-  const vowelPool = ["A", "E", "I", "O", "U"];
-  const consonantPool = Object.keys(LETTER_WEIGHTS).filter(letter => !VOWELS.has(letter));
-
-  let guard = 0;
-  while (letters.filter(isVowel).length < MIN_BOARD_VOWELS && guard < 200) {
-    const consonantIndexes = letters.map((letter, i) => isVowel(letter) ? -1 : i).filter(i => i >= 0);
-    if (!consonantIndexes.length) break;
-    letters[consonantIndexes[Math.floor(random() * consonantIndexes.length)]] = vowelPool[Math.floor(random() * vowelPool.length)];
-    guard++;
-  }
-  guard = 0;
-  while (letters.filter(isVowel).length > MAX_BOARD_VOWELS && guard < 200) {
-    const vowelIndexes = letters.map((letter, i) => isVowel(letter) ? i : -1).filter(i => i >= 0);
-    if (!vowelIndexes.length) break;
-    letters[vowelIndexes[Math.floor(random() * vowelIndexes.length)]] = consonantPool[Math.floor(random() * consonantPool.length)];
-    guard++;
-  }
-
-  guard = 0;
-  while (guard < 400) {
-    const byLetter = new Map<string, number[]>();
-    letters.forEach((letter, i) => byLetter.set(letter, [...(byLetter.get(letter) ?? []), i]));
-    const offender = [...byLetter.entries()].find(([, indexes]) => indexes.length > MAX_LETTER_REPEATS);
-    if (!offender) break;
-    const [letter, indexes] = offender;
-    const replacementPool = (isVowel(letter) ? vowelPool : consonantPool).filter(candidate => candidate !== letter);
-    letters[indexes[Math.floor(random() * indexes.length)]] = replacementPool[Math.floor(random() * replacementPool.length)];
-    guard++;
-  }
 
   // Relocate vowels from elsewhere on the board into the ring — a straight swap, so it never
-  // disturbs the overall vowel count or the duplicate-letter caps enforced above.
-  guard = 0;
+  // disturbs the overall bag composition.
+  let guard = 0;
   while (RING1_TILES.filter(i => isVowel(letters[i])).length < MIN_RING1_VOWELS && guard < 30) {
     const ring1Consonants = RING1_TILES.filter(i => !isVowel(letters[i]));
     const outsideVowels = letters.map((letter, i) => (!RING1_TILES.includes(i) && isVowel(letter)) ? i : -1).filter(i => i >= 0);
@@ -234,8 +224,8 @@ function drawLetters(random: () => number, count = BOARD_SIZE) {
   return letters;
 }
 
-function shuffledLetters() {
-  return drawLetters(Math.random);
+function shuffledLetters(difficulty: Difficulty) {
+  return drawLetters(Math.random, difficulty === "fierce");
 }
 
 function todayKey() {
@@ -291,7 +281,7 @@ function calendarDays(value: string) {
 // Bump this whenever the letter-drawing algorithm changes in a way that should reroll every daily
 // board (past and present) onto the new, fairer distribution — every player still gets the same
 // board for a given date, this just changes which board that is.
-const DAILY_BOARD_VERSION = "v2";
+const DAILY_BOARD_VERSION = "v3";
 
 function seededLetters(seed: string) {
   let state = [...seed].reduce((hash, char) => Math.imul(hash ^ char.charCodeAt(0), 16777619), 2166136261) >>> 0;
@@ -302,7 +292,9 @@ function seededLetters(seed: string) {
     value ^= value + Math.imul(value ^ value >>> 7, value | 61);
     return ((value ^ value >>> 14) >>> 0) / 4294967296;
   };
-  return drawLetters(random);
+  // The Daily challenge is one board shared by everyone regardless of which difficulty each
+  // player picks, so it always draws from the safer Clever-level pool — never Fierce's J/Q/X/Z.
+  return drawLetters(random, false);
 }
 
 export function neighbors(index: number) {
@@ -986,7 +978,7 @@ export default function Home() {
     setDifficulty(level);
     setMode(nextMode);
     setDailyDate(date);
-    setLetters(nextMode === "daily" && date ? seededLetters(`GRIDLOCK-${DAILY_BOARD_VERSION}-${date}`) : shuffledLetters());
+    setLetters(nextMode === "daily" && date ? seededLetters(`GRIDLOCK-${DAILY_BOARD_VERSION}-${date}`) : shuffledLetters(level));
     setOwners(Array(BOARD_SIZE).fill(0));
     setSelected([]);
     setPlayed([]);
