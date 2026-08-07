@@ -22,6 +22,8 @@ const supplementalWords = [
   "underhand", "underhanded", "underhandedly", "underhandedness", "underhands",
   "undercarriage", "undercarriages",
   "wanderlust", "wanderlusts", "wanderlusty",
+  "wordless", "wordlessly", "wordlessness",
+  "longshot", "longshots",
 ];
 const words = [...new Set([...JSON.parse(encoded), ...wiktionaryWords, ...clientEncoded.trim().split(/\s+/), ...strategyEncoded.trim().split(/\s+/), ...supplementalWords])].sort();
 if (!Array.isArray(words) || words.length < 50000) throw new Error("ENCIRCLE dictionary is unexpectedly small.");
