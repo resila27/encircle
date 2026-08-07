@@ -54,6 +54,28 @@ yard year yellow yes yet you young your
 `.trim().split(/\s+/);
 
 const BOT_WORDS = [...new Set([...WORDS, ...STRATEGY_WORDS])];
+
+// The rival's move-scoring stays on the small curated BOT_WORDS list so its play style stays
+// predictable, but that list is too thin to reliably spot game-ending finishing words late in a
+// match. We lazily fetch the same full dictionary the server validates human words against and
+// cache it in memory, so the endgame finisher search (see selectRivalMove below) can draw on it
+// once it's loaded without paying the cost on every single move.
+let fullDictionaryCache: string[] | null = null;
+let fullDictionaryPromise: Promise<string[]> | null = null;
+function loadFullDictionary(): Promise<string[]> {
+  if (fullDictionaryCache) return Promise.resolve(fullDictionaryCache);
+  if (!fullDictionaryPromise) {
+    fullDictionaryPromise = fetch("/api/data/words.json")
+      .then(response => response.ok ? response.json() : [])
+      .then((words: unknown) => {
+        fullDictionaryCache = Array.isArray(words) ? words : [];
+        return fullDictionaryCache;
+      })
+      .catch(() => []);
+  }
+  return fullDictionaryPromise;
+}
+
 const POWER_WORD_SET = new Set(STRATEGY_WORDS);
 const COMPOUND_WORD_SET = new Set(COMPOUND_WORDS);
 const MAX_NON_FIERCE_COMPOUND_WORDS = 2;
@@ -160,17 +182,20 @@ const RING_ANCHORS = OUTER_TILES.filter(index => TILE_NEIGHBORS[index].length ==
 // Fixed-composition letter bag (replaces the old pure-weighted draw, which drifted too far from
 // board to board — anywhere from 6 to 15+ vowels, letters like Q/X/Z sometimes doubling up).
 //   - A/E/I/O/U: exactly 2 of each (10 tiles).
-//   - S/T/R/N/G/L/D/C/M: exactly 1 of each (9 tiles) — a dependable core of common consonants.
-//   - The remaining 11 tiles come from the rest of the alphabet (B F H J K P Q V W X Y Z), each
-//     appearing at most once. Fierce draws 11 of those 12 (including J/Q/X/Z), leaving one out at
-//     random each game. Relaxed, Clever, and the Daily challenge exclude J/Q/X/Z entirely — since
-//     that only leaves 8 unique letters for 11 slots, 3 of those 8 get a second copy instead.
+//   - S/N/R: exactly 2 of each (6 tiles) — the three most useful consonants get the same doubled
+//     treatment as the vowels.
+//   - T/G/L/D/C/M: exactly 1 of each (6 tiles) — a dependable core of common consonants.
+//   - The remaining 8 tiles come from the rest of the alphabet (B F H J K P Q V W X Y Z), each
+//     appearing at most once. Fierce draws 8 of those 12 (including J/Q/X/Z), leaving four out at
+//     random each game. Relaxed, Clever, and the Daily challenge exclude J/Q/X/Z entirely, which
+//     leaves exactly 8 unique letters (B F H K P V W Y) for the 8 slots — a clean fit, no repeats.
 const VOWELS = new Set(["A", "E", "I", "O", "U"]);
 const GUARANTEED_VOWELS = ["A", "E", "I", "O", "U"];
-const GUARANTEED_SINGLES = ["S", "T", "R", "N", "G", "L", "D", "C", "M"];
+const GUARANTEED_DOUBLES = ["S", "N", "R"];
+const GUARANTEED_SINGLES = ["T", "G", "L", "D", "C", "M"];
 const RARE_LETTERS = ["B", "F", "H", "J", "K", "P", "Q", "V", "W", "X", "Y", "Z"];
 const RARE_LETTERS_SAFE = RARE_LETTERS.filter(letter => !["J", "Q", "X", "Z"].includes(letter));
-const RARE_SLOT_COUNT = BOARD_SIZE - GUARANTEED_VOWELS.length * 2 - GUARANTEED_SINGLES.length;
+const RARE_SLOT_COUNT = BOARD_SIZE - GUARANTEED_VOWELS.length * 2 - GUARANTEED_DOUBLES.length * 2 - GUARANTEED_SINGLES.length;
 // The six tiles ringing the center (indices 1..BOARD_RING_COUNTS[1]) need a couple of vowels of
 // their own so locking the center — which requires owning all six — stays realistic for an average
 // player. A single guaranteed vowel still leaves five consonants that can only ever pair with
@@ -196,6 +221,7 @@ function shuffleWith<T>(random: () => number, values: T[]) {
 function drawLetters(random: () => number, allowRareQuad: boolean) {
   const bag: string[] = [];
   GUARANTEED_VOWELS.forEach(letter => bag.push(letter, letter));
+  GUARANTEED_DOUBLES.forEach(letter => bag.push(letter, letter));
   GUARANTEED_SINGLES.forEach(letter => bag.push(letter));
   if (allowRareQuad) {
     bag.push(...shuffleWith(random, RARE_LETTERS).slice(0, RARE_SLOT_COUNT));
@@ -523,7 +549,7 @@ function bestReplySwing(source: Owner[], letters: string[], usedWords: Set<strin
   }, 0);
 }
 
-export function selectRivalMove(sourceOwners: Owner[], sourcePlayed: PlayedWord[], letters: string[], difficulty: Difficulty, deterministic = false) {
+export function selectRivalMove(sourceOwners: Owner[], sourcePlayed: PlayedWord[], letters: string[], difficulty: Difficulty, deterministic = false, dictionaryWords?: string[]) {
   const usedWords = new Set(sourcePlayed.map(play => play.word));
   // Compounds (WORDPLAY-style) are capped per game so the rival doesn't lean on them every turn;
   // prefixes, suffixes, and plurals (EXTENDED_WORD_SET) stay unrestricted at every difficulty.
@@ -539,7 +565,17 @@ export function selectRivalMove(sourceOwners: Owner[], sourcePlayed: PlayedWord[
     // that uses up every remaining blank in one move AND leaves the rival ahead — a genuine game-
     // ending finisher, not just a strong move. Among several such finishers, prefer the longer word
     // since it locks in more ground along the way.
-    const finishers = availableCandidates
+    // The rival's regular vocabulary (BOT_WORDS) is deliberately small, which meant it could walk
+    // right past a real finishing word just because that word wasn't in its curated list. Once the
+    // board is down to a handful of blanks, also check the full dictionary (loaded once and cached
+    // — see loadFullDictionary above) so it works as hard as a human would to close the game out.
+    const finisherPool = blanks <= 12 && dictionaryWords?.length
+      ? [...new Set([
+          ...availableCandidates,
+          ...dictionaryWords.filter(word => word.length >= minLength && word.length <= 15 && !blocksPlayedWord(word, usedWords) && canForm(word, letters)),
+        ])]
+      : availableCandidates;
+    const finishers = finisherPool
       .map(word => {
         const ids = chooseFinishingTiles(word, letters, sourceOwners);
         if (!ids) return null;
@@ -910,6 +946,10 @@ export default function Home() {
     if (window.localStorage.getItem("gridlock-tutorial-v2") !== "seen") setTutorialOpen(true);
   }, []);
 
+  // Warm the full-dictionary cache as soon as the app loads so it's ready well before the rival
+  // ever needs it for an endgame finishing move (see loadFullDictionary / selectRivalMove).
+  useEffect(() => { void loadFullDictionary(); }, []);
+
   useEffect(() => {
     let cancelled = false;
     getAccountStatus()
@@ -1024,7 +1064,7 @@ export default function Home() {
   }, []);
 
   const rivalMove = useCallback((sourceOwners: Owner[], sourcePlayed: PlayedWord[]) => {
-    const move = selectRivalMove(sourceOwners, sourcePlayed, letters, difficulty, mode === "daily");
+    const move = selectRivalMove(sourceOwners, sourcePlayed, letters, difficulty, mode === "daily", fullDictionaryCache ?? undefined);
     if (!move) { setTurn("you"); setMessage("Your turn"); return; }
     const nextOwners = move.nextOwners;
     const nextPlayed = [...sourcePlayed, { word: move.word, owner: 2 as const, captures: move.captures }];
