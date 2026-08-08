@@ -567,20 +567,22 @@ export function selectRivalMove(sourceOwners: Owner[], sourcePlayed: PlayedWord[
   if (blanks > 0) {
     // decidedOutcome only returns non-null once every tile is claimed, so this only matches a word
     // that uses up every remaining blank in one move AND leaves the rival ahead — a genuine game-
-    // ending finisher, not just a strong move. Among several such finishers, prefer the longer word
-    // since it locks in more ground along the way.
+    // ending finisher, not just a strong move.
     // The rival's regular vocabulary (BOT_WORDS) is deliberately small, which meant it could walk
     // right past a real finishing word just because that word wasn't in its curated list. Once the
     // board is down to a handful of blanks, also check the full dictionary (loaded once and cached
     // — see loadFullDictionary above) so it works as hard as a human would to close the game out.
     // Relaxed stays on its small curated list here on purpose — it's meant to be the easy/beginner
     // difficulty, and letting it reach into a 200k+ word dictionary for a closing move (e.g. an
-    // obscure 13-letter finisher) defeats the point of "relaxed." Word length also stays capped at
-    // dynamicMax so a widened finisher search can't hand Clever a Fierce-length word either.
+    // obscure finisher) defeats the point of "relaxed." The dictionary is a full Scrabble-style
+    // word list (it includes plenty of words no casual player would recognize), so even for
+    // Clever/Fierce the widened search is capped at 8 letters — long enough to catch real finishing
+    // words, short enough to stay away from things like BIVOUACKED or REMANUFACTURING.
+    const WIDENED_FINISHER_MAX_LENGTH = 8;
     const finisherPool = blanks <= 12 && difficulty !== "relaxed" && dictionaryWords?.length
       ? [...new Set([
           ...availableCandidates,
-          ...dictionaryWords.filter(word => word.length >= minLength && word.length <= dynamicMax && !blocksPlayedWord(word, usedWords) && canForm(word, letters)),
+          ...dictionaryWords.filter(word => word.length >= minLength && word.length <= Math.min(dynamicMax, WIDENED_FINISHER_MAX_LENGTH) && !blocksPlayedWord(word, usedWords) && canForm(word, letters)),
         ])]
       : availableCandidates;
     const finishers = finisherPool
@@ -591,7 +593,15 @@ export function selectRivalMove(sourceOwners: Owner[], sourcePlayed: PlayedWord[
         return decidedOutcome(nextOwners) === "rival" ? { word, ids, nextOwners } : null;
       })
       .filter((entry): entry is { word: string; ids: number[]; nextOwners: Owner[] } => entry !== null)
-      .sort((a, b) => b.word.length - a.word.length);
+      // Prefer a finisher from the rival's normal curated vocabulary over one that only turned up
+      // via the widened dictionary search, and prefer the shorter (more everyday) word as a
+      // tiebreaker — the goal is a finish a human would recognize, not the showiest possible word.
+      .sort((a, b) => {
+        const aCommon = BOT_WORDS.includes(a.word) ? 1 : 0;
+        const bCommon = BOT_WORDS.includes(b.word) ? 1 : 0;
+        if (aCommon !== bCommon) return bCommon - aCommon;
+        return a.word.length - b.word.length;
+      });
     const finisher = finishers[0];
     if (finisher) {
       const { word, ids, nextOwners } = finisher;
