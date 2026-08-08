@@ -118,7 +118,8 @@ function stats_for_user(int $userId): array {
     );
     $statement->execute([$userId]);
     $stats = empty_stats();
-    $dailyDates = [];
+    $dailyPlayedDates = [];
+    $dailyWinDates = [];
     foreach ($statement->fetchAll() as $row) {
         $stats['completed']++;
         $result = (string) ($row['result'] ?? '');
@@ -141,13 +142,23 @@ function stats_for_user(int $userId): array {
             $margin = count(array_filter($owners, static fn ($owner) => $owner === 1)) - count(array_filter($owners, static fn ($owner) => $owner === 2));
             $stats['bestMargin'] = max($stats['bestMargin'], $margin);
         }
+        // Streak only counts days you actually won the daily challenge — playing (and losing)
+        // shouldn't keep a streak alive.
         if (($game['mode'] ?? '') === 'daily' && preg_match('/^\d{4}-\d{2}-\d{2}$/', (string) ($game['dailyDate'] ?? ''))) {
-            $dailyDates[(string) $game['dailyDate']] = true;
+            $dailyDate = (string) $game['dailyDate'];
+            $dailyPlayedDates[$dailyDate] = true;
+            if ($result === 'win') $dailyWinDates[$dailyDate] = true;
         }
     }
-    $dates = array_keys($dailyDates);
+    $today = (new DateTimeImmutable('today', new DateTimeZone('America/Los_Angeles')))->format('Y-m-d');
+    // If today's daily has already been played and wasn't a win, the streak is broken right now —
+    // don't fall back to counting yesterday's streak as if today hadn't happened yet.
+    if (isset($dailyPlayedDates[$today]) && !isset($dailyWinDates[$today])) {
+        $stats['streak'] = 0;
+    }
+    $dates = array_keys($dailyWinDates);
     rsort($dates);
-    if ($dates) {
+    if ($dates && !(isset($dailyPlayedDates[$today]) && !isset($dailyWinDates[$today]))) {
         $cursor = new DateTimeImmutable('today', new DateTimeZone('America/Los_Angeles'));
         $latest = new DateTimeImmutable($dates[0], new DateTimeZone('America/Los_Angeles'));
         if ($latest < $cursor) $cursor = $cursor->modify('-1 day');

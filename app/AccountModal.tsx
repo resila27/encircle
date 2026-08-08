@@ -67,7 +67,7 @@ export function AccountModal({ account, stats, onClose, onLogin, onLogout }: Pro
               <div><strong>{stats.wins}</strong><span>Wins</span></div>
               <div><strong>{winRate}%</strong><span>Win rate</span></div>
               <div><strong>{stats.streak}</strong><span>Day streak</span></div>
-              <div><strong>{stats.longestWord ? stats.longestWord.toUpperCase() : "—"}</strong><span>Best word</span></div>
+              <div><strong>{stats.longestWord ? stats.longestWord.toUpperCase() : "—"}</strong><span>Your best word</span></div>
               <div><strong>{stats.bestMargin > 0 ? `+${stats.bestMargin}` : stats.bestMargin}</strong><span>Best margin</span></div>
             </div>
             <div className="rival-records">

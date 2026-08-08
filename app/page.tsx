@@ -554,11 +554,15 @@ export function selectRivalMove(sourceOwners: Owner[], sourcePlayed: PlayedWord[
   // Compounds (WORDPLAY-style) are capped per game so the rival doesn't lean on them every turn;
   // prefixes, suffixes, and plurals (EXTENDED_WORD_SET) stay unrestricted at every difficulty.
   const compoundWordsPlayed = sourcePlayed.filter(play => play.owner === 2 && COMPOUND_WORD_SET.has(play.word)).length;
+  // Turn number counting every play so far, both sides — a compound word as the rival's opening
+  // move or two reads as showing off rather than playing naturally, so non-fierce difficulties
+  // hold off on them until turn 5.
+  const turnNumber = sourcePlayed.length + 1;
   const blanks = sourceOwners.filter(owner => owner === 0).length;
   const maxLength = difficulty === "fierce" ? 15 : difficulty === "clever" ? 10 : 6;
   const minLength = blanks <= 8 ? 2 : 3;
   const dynamicMax = Math.max(minLength, maxLength);
-  const availableCandidates = BOT_WORDS.filter(word => word.length >= minLength && word.length <= dynamicMax && !blocksPlayedWord(word, usedWords) && (difficulty === "fierce" || !COMPOUND_WORD_SET.has(word) || compoundWordsPlayed < MAX_NON_FIERCE_COMPOUND_WORDS) && canForm(word, letters));
+  const availableCandidates = BOT_WORDS.filter(word => word.length >= minLength && word.length <= dynamicMax && !blocksPlayedWord(word, usedWords) && (difficulty === "fierce" || !COMPOUND_WORD_SET.has(word) || (compoundWordsPlayed < MAX_NON_FIERCE_COMPOUND_WORDS && turnNumber >= 5)) && canForm(word, letters));
 
   if (blanks > 0) {
     // decidedOutcome only returns non-null once every tile is claimed, so this only matches a word
@@ -639,14 +643,21 @@ const LABELS: Record<Difficulty, { name: string; note: string; face: string }> =
 };
 
 // Only called once decidedOutcome has confirmed every tile is claimed (see decidedOutcome).
-// winningWord is the word that completed the board — the deciding play of the game.
-function describeOutcome(finalOwners: Owner[], difficulty: Difficulty, winningWord: string) {
+// winningWord is the word that completed the board — the deciding play of the game — and
+// closerOwner is whoever actually played it. Those two things can point different directions:
+// closing the board out doesn't mean you won it, if the other side already banked more tiles
+// earlier in the game. So the message credits the close and the win separately.
+function describeOutcome(finalOwners: Owner[], difficulty: Difficulty, winningWord: string, closerOwner: 1 | 2) {
   const you = finalOwners.filter(o => o === 1).length;
   const rival = finalOwners.filter(o => o === 2).length;
   const word = winningWord.toUpperCase();
-  if (you > rival) return `You encircled the board with ${word}!`;
-  if (rival > you) return `${LABELS[difficulty].name} encircled the board with ${word}.`;
-  return `Every tile is claimed — it's a tie. Final word: ${word}.`;
+  const rivalName = LABELS[difficulty].name;
+  if (you === rival) return `Every tile is claimed — it's a tie. Final word: ${word}.`;
+  const youWon = you > rival;
+  if (youWon && closerOwner === 1) return `You encircled the board with ${word}!`;
+  if (!youWon && closerOwner === 2) return `${rivalName} encircled the board with ${word}.`;
+  if (youWon && closerOwner === 2) return `${rivalName} played ${word}. You encircled the board!`;
+  return `You played ${word}. ${rivalName} encircled the board. Better luck next time...`;
 }
 
 type DailyResult = { letters: string[]; owners: Owner[]; played: PlayedWord[]; message: string };
@@ -895,7 +906,7 @@ export default function Home() {
   const projectedYourScore = projectedOwners.filter(o => o === 1).length;
   const projectedRivalScore = projectedOwners.filter(o => o === 2).length;
   const showingProjectedScore = selected.length > 0 && turn === "you";
-  const longestWord = played.reduce((best, play) => play.word.length > best.length ? play.word : best, "");
+  const longestWord = played.filter(play => play.owner === 1).reduce((best, play) => play.word.length > best.length ? play.word : best, "");
   const biggestSteal = played.filter(play => play.owner === 1).reduce((best, play) => Math.max(best, play.captures ?? 0), 0);
   const result = yourScore > rivalScore ? "win" : yourScore < rivalScore ? "loss" : "tie";
   // Trust the saved results snapshot itself, not just the old completion flag — a stale flag with
@@ -1077,9 +1088,9 @@ export default function Home() {
     setPlayed(nextPlayed);
     const decided = decidedOutcome(nextOwners);
     setTurn(decided ? "done" : "you");
-    setMessage(decided ? describeOutcome(nextOwners, difficulty, move.word) : `${LABELS[difficulty].name} played ${move.word.toUpperCase()}`);
+    setMessage(decided ? describeOutcome(nextOwners, difficulty, move.word, 2) : `${LABELS[difficulty].name} played ${move.word.toUpperCase()}`);
     if (decided) {
-      if (mode === "daily" && dailyDate) saveDailyResult(dailyDate, { letters, owners: nextOwners, played: nextPlayed, message: describeOutcome(nextOwners, difficulty, move.word) });
+      if (mode === "daily" && dailyDate) saveDailyResult(dailyDate, { letters, owners: nextOwners, played: nextPlayed, message: describeOutcome(nextOwners, difficulty, move.word, 2) });
       window.setTimeout(() => setResultsOpen(true), WIN_MESSAGE_HOLD_MS);
     }
   }, [celebrateClaim, dailyDate, difficulty, letters, mode]);
@@ -1127,7 +1138,7 @@ export default function Home() {
     const decided = decidedOutcome(nextOwners);
     if (decided) {
       setTurn("done");
-      const finishedMessage = describeOutcome(nextOwners, difficulty, currentWord);
+      const finishedMessage = describeOutcome(nextOwners, difficulty, currentWord, 1);
       setMessage(finishedMessage);
       if (mode === "daily" && dailyDate) saveDailyResult(dailyDate, { letters, owners: nextOwners, played: nextPlayed, message: finishedMessage });
       window.setTimeout(() => setResultsOpen(true), WIN_MESSAGE_HOLD_MS);
@@ -1176,7 +1187,7 @@ export default function Home() {
       return ring;
     }).join("\n");
     const heading = mode === "daily" && dailyDate ? `ENCIRCLE Daily ${dailyDate}` : `ENCIRCLE vs ${LABELS[difficulty].name}`;
-    const text = `${heading}\n${yourScore}–${rivalScore} ${result === "win" ? "Win" : result === "loss" ? "Loss" : "Tie"}\n${circles}\n${longestWord ? `Best word: ${longestWord.toUpperCase()}\n` : ""}https://playencircle.com`;
+    const text = `${heading}\n${yourScore}–${rivalScore} ${result === "win" ? "Win" : result === "loss" ? "Loss" : "Tie"}\n${circles}\n${longestWord ? `Your best word: ${longestWord.toUpperCase()}\n` : ""}https://playencircle.com`;
     const canShare = typeof navigator.share === "function";
     try {
       if (canShare) await navigator.share({ text, title: "My ENCIRCLE result" });
@@ -1401,7 +1412,7 @@ export default function Home() {
           <h2 id="results-title">{result === "win" ? "Tiles claimed!" : result === "loss" ? "The rival held on." : "Deadlocked."}</h2>
           <div className="final-score"><strong>{yourScore}</strong><span>–</span><strong>{rivalScore}</strong></div>
           <div className="result-highlights">
-            <div><span>Best word</span><button title={longestWord.toUpperCase()} type="button" onClick={() => longestWord && void lookUpWord(longestWord)}>{longestWord ? longestWord.toUpperCase() : "—"}</button></div>
+            <div><span>Your best word</span><button title={longestWord.toUpperCase()} type="button" onClick={() => longestWord && void lookUpWord(longestWord)}>{longestWord ? longestWord.toUpperCase() : "—"}</button></div>
             <div><span>Biggest steal</span><strong>{biggestSteal}</strong></div>
             {mode === "daily" && <div><span>Daily standing</span>{dailyStanding ? <strong>{`#${dailyStanding.rank} of ${dailyStanding.total}`}</strong> : account ? <strong>Calculating…</strong> : <button className="daily-standing-signin" onClick={() => setAccountOpen(true)} type="button">Sign in</button>}</div>}
           </div>
