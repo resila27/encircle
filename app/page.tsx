@@ -182,20 +182,22 @@ const RING_ANCHORS = OUTER_TILES.filter(index => TILE_NEIGHBORS[index].length ==
 // Fixed-composition letter bag (replaces the old pure-weighted draw, which drifted too far from
 // board to board — anywhere from 6 to 15+ vowels, letters like Q/X/Z sometimes doubling up).
 //   - A/E/I/O/U: exactly 2 of each (10 tiles).
-//   - S/N/R: exactly 2 of each (6 tiles) — the three most useful consonants get the same doubled
-//     treatment as the vowels.
-//   - T/G/L/D/C/M: exactly 1 of each (6 tiles) — a dependable core of common consonants.
+//   - S/T/R/N/G/L/D/C/M: a dependable core of common consonants, 12 tiles total — but which three
+//     of the nine get doubled (2 copies) versus single (1 copy) is re-rolled every game instead of
+//     always being S/N/R, so the board doesn't feel like it's drawing from the same fixed set each
+//     time. The 3-doubled/6-single split keeps the total at 12 either way, so nothing downstream
+//     (the rare-letter slot math below) has to change game to game.
 //   - The remaining 8 tiles come from the rest of the alphabet (B F H J K P Q V W X Y Z), each
 //     appearing at most once. Fierce draws 8 of those 12 (including J/Q/X/Z), leaving four out at
 //     random each game. Relaxed, Clever, and the Daily challenge exclude J/Q/X/Z entirely, which
 //     leaves exactly 8 unique letters (B F H K P V W Y) for the 8 slots — a clean fit, no repeats.
 const VOWELS = new Set(["A", "E", "I", "O", "U"]);
 const GUARANTEED_VOWELS = ["A", "E", "I", "O", "U"];
-const GUARANTEED_DOUBLES = ["S", "N", "R"];
-const GUARANTEED_SINGLES = ["T", "G", "L", "D", "C", "M"];
+const CORE_CONSONANTS = ["S", "T", "R", "N", "G", "L", "D", "C", "M"];
+const CORE_DOUBLE_COUNT = 3;
 const RARE_LETTERS = ["B", "F", "H", "J", "K", "P", "Q", "V", "W", "X", "Y", "Z"];
 const RARE_LETTERS_SAFE = RARE_LETTERS.filter(letter => !["J", "Q", "X", "Z"].includes(letter));
-const RARE_SLOT_COUNT = BOARD_SIZE - GUARANTEED_VOWELS.length * 2 - GUARANTEED_DOUBLES.length * 2 - GUARANTEED_SINGLES.length;
+const RARE_SLOT_COUNT = BOARD_SIZE - GUARANTEED_VOWELS.length * 2 - CORE_CONSONANTS.length - CORE_DOUBLE_COUNT;
 // The six tiles ringing the center (indices 1..BOARD_RING_COUNTS[1]) need a couple of vowels of
 // their own so locking the center — which requires owning all six — stays realistic for an average
 // player. A single guaranteed vowel still leaves five consonants that can only ever pair with
@@ -221,8 +223,9 @@ function shuffleWith<T>(random: () => number, values: T[]) {
 function drawLetters(random: () => number, allowRareQuad: boolean) {
   const bag: string[] = [];
   GUARANTEED_VOWELS.forEach(letter => bag.push(letter, letter));
-  GUARANTEED_DOUBLES.forEach(letter => bag.push(letter, letter));
-  GUARANTEED_SINGLES.forEach(letter => bag.push(letter));
+  const shuffledCore = shuffleWith(random, CORE_CONSONANTS);
+  const coreDoubles = new Set(shuffledCore.slice(0, CORE_DOUBLE_COUNT));
+  CORE_CONSONANTS.forEach(letter => bag.push(letter, ...(coreDoubles.has(letter) ? [letter] : [])));
   if (allowRareQuad) {
     bag.push(...shuffleWith(random, RARE_LETTERS).slice(0, RARE_SLOT_COUNT));
   } else {
@@ -307,7 +310,7 @@ function calendarDays(value: string) {
 // Bump this whenever the letter-drawing algorithm changes in a way that should reroll every daily
 // board (past and present) onto the new, fairer distribution — every player still gets the same
 // board for a given date, this just changes which board that is.
-const DAILY_BOARD_VERSION = "v3";
+const DAILY_BOARD_VERSION = "v4";
 
 function seededLetters(seed: string) {
   let state = [...seed].reduce((hash, char) => Math.imul(hash ^ char.charCodeAt(0), 16777619), 2166136261) >>> 0;
