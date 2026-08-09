@@ -26,9 +26,11 @@ export const BOARD_SIZE = BOARD_RING_COUNTS.reduce((sum, count) => sum + count, 
 export const BOARD_VERSION = "circular-31-v1";
 const WIN_MESSAGE_HOLD_MS = 2800;
 
-// Capturing the center "bullseye" tile (index 0) grants the capturing side an immediate bonus
-// turn instead of passing play. Kept behind a flag so it's a one-line revert if playtesting says
-// otherwise — flip to false to go back to the center being an ordinary tile.
+// Locking the center "bullseye" tile (index 0) — i.e. owning it AND surrounding it with your own
+// tiles, same as any other stronghold — grants that side an immediate bonus turn instead of passing
+// play. Merely claiming/capturing the center in a word isn't enough on its own. Kept behind a flag
+// so it's a one-line revert if playtesting says otherwise — flip to false to go back to the center
+// being an ordinary tile.
 const CENTER_BONUS_ENABLED = true;
 const CENTER_TILE = 0;
 
@@ -711,7 +713,7 @@ function loadDailyResult(date: string): DailyResult | null {
 const TUTORIAL_SLIDES = [
   {
     kind: "claim", eyebrow: "The basic move", title: "Make words. Take ground.",
-    body: "Choose tiles anywhere on the 31-tile board, then submit your word. Every tile you use becomes yours, so useful words are also territory moves. Claim the center bullseye tile and you get an immediate bonus turn.",
+    body: "Choose tiles anywhere on the 31-tile board, then submit your word. Every tile you use becomes yours, so useful words are also territory moves. Surround the center bullseye tile with your own letters and you get an immediate bonus turn.",
   },
   {
     kind: "defend", eyebrow: "Think one turn ahead", title: "Protect yours. Break theirs.",
@@ -746,8 +748,9 @@ function demoLetters(word: string, selected: readonly number[]) {
 // concept either way since they're illustrative, not a live simulation.
 const TUTORIAL_DEMOS = {
   // Playing CIRCLES claims the six tiles ringing the center (1-6) plus the center tile itself (0,
-  // landing the final S there), so submitting the word both captures the center (a bonus turn —
-  // see CENTER_BONUS_ENABLED) and locks it in the same move.
+  // landing the final S there) all in one move — claiming every tile touching the bullseye at once
+  // surrounds and locks it immediately, which is what earns the bonus turn (see CENTER_BONUS_ENABLED;
+  // the bonus only fires once the center is actually locked, not just captured).
   claim: {
     word: "CIRCLES",
     selected: [1, 2, 3, 4, 5, 6, 0],
@@ -834,6 +837,9 @@ function TutorialDemo({ kind }: { kind: typeof TUTORIAL_SLIDES[number]["kind"] }
                 {layout.ring === 0
                   ? <circle className="tile-shape" cx={50} cy={50} r={layout.rOut} />
                   : <path className="tile-shape" d={sectorPath(layout.rIn, layout.rOut, layout.a0, layout.a1)} />}
+                {CENTER_BONUS_ENABLED && layout.ring === 0 && (
+                  <circle className="tile-bonus-ring" cx={50} cy={50} r={layout.rOut - 1.2} fill="none" pointerEvents="none" />
+                )}
                 <text className="tile-letter" dy="0.32em" textAnchor="middle" x={tx} y={ty}>{letter}</text>
               </g>
             );
@@ -1114,15 +1120,17 @@ export default function Home() {
     setOwners(nextOwners);
     setPlayed(nextPlayed);
     const decided = decidedOutcome(nextOwners);
-    // Capturing the center bullseye tile earns an extra turn (see CENTER_BONUS_ENABLED) — check
-    // whether this move actually changed who holds it, not just whether the rival happens to own
-    // it already, so replaying through an own-owned center doesn't re-trigger the bonus.
-    const bonusTurn = !decided && CENTER_BONUS_ENABLED && sourceOwners[CENTER_TILE] !== nextOwners[CENTER_TILE] && nextOwners[CENTER_TILE] === 2;
+    // The bullseye bonus turn only fires when the center tile becomes locked — i.e. the rival owns
+    // it AND has now surrounded it with their own tiles too (the same "stronghold" condition as any
+    // other locked tile), not merely from playing a word that includes the center. Compare
+    // protectedTiles() before/after so an already-locked center doesn't re-trigger the bonus.
+    const centerNewlyLocked = protectedTiles(nextOwners)[CENTER_TILE] && !protectedTiles(sourceOwners)[CENTER_TILE];
+    const bonusTurn = !decided && CENTER_BONUS_ENABLED && centerNewlyLocked && nextOwners[CENTER_TILE] === 2;
     setTurn(decided ? "done" : bonusTurn ? "rival" : "you");
     setMessage(decided
       ? describeOutcome(nextOwners, difficulty, move.word, 2)
       : bonusTurn
-        ? `${LABELS[difficulty].name} played ${move.word.toUpperCase()} and took the bullseye — bonus turn.`
+        ? `${LABELS[difficulty].name} played ${move.word.toUpperCase()} and surrounded the bullseye — bonus turn.`
         : `${LABELS[difficulty].name} played ${move.word.toUpperCase()}`);
     if (decided) {
       if (mode === "daily" && dailyDate) saveDailyResult(dailyDate, { letters, owners: nextOwners, played: nextPlayed, message: describeOutcome(nextOwners, difficulty, move.word, 2) });
@@ -1181,11 +1189,13 @@ export default function Home() {
       window.setTimeout(() => setResultsOpen(true), WIN_MESSAGE_HOLD_MS);
       return;
     }
-    // Same bullseye bonus as the rival gets in rivalMove above — only fires when this move actually
-    // changed the center's owner to you.
-    if (CENTER_BONUS_ENABLED && owners[CENTER_TILE] !== nextOwners[CENTER_TILE] && nextOwners[CENTER_TILE] === 1) {
+    // Same bullseye bonus as the rival gets in rivalMove above — only fires once you've both claimed
+    // the center AND surrounded it with your own tiles (i.e. it just became locked), not merely from
+    // playing a word that touches the center.
+    const centerNewlyLockedByYou = protectedTiles(nextOwners)[CENTER_TILE] && !protectedTiles(owners)[CENTER_TILE];
+    if (CENTER_BONUS_ENABLED && centerNewlyLockedByYou && nextOwners[CENTER_TILE] === 1) {
       setTurn("you");
-      setMessage("Bullseye! Bonus turn — go again.");
+      setMessage("Bullseye! You've surrounded the center — bonus turn, go again.");
       return;
     }
     setTurn("rival");
@@ -1350,7 +1360,7 @@ export default function Home() {
         <article><span>1</span><div><h3>Make a word</h3><p>Tap letters in any order. Every letter you use becomes yours.</p></div></article>
         <article><span>2</span><div><h3>Steal their letters</h3><p>Use a rival’s letter in your word and it changes to your color.</p></div></article>
         <article><span>3</span><div><h3>Build a stronghold</h3><p>Surround a letter with your color to lock it. Locked letters can’t be stolen.</p></div></article>
-        <article><span>4</span><div><h3>Capture the bullseye</h3><p>The board has 31 tiles, so there’s always a winner — no ties. The center tile is marked with a dotted ring: claim it in a word and you get an extra turn.</p></div></article>
+        <article><span>4</span><div><h3>Surround the bullseye</h3><p>The board has 31 tiles, so there’s always a winner — no ties. The center tile is marked with a dotted ring: own it and lock it by surrounding it with your own letters, and you get an extra turn.</p></div></article>
       </div>
       <button className="primary" onClick={() => newGame("relaxed")}>Play a relaxed game</button>
     </main>{tutorialModal}{accountModal}</>

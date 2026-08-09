@@ -61,7 +61,7 @@ h1 { margin:0; font-family:Georgia,serif; font-size:clamp(55px,16vw,78px); line-
 .circular-board-svg .tile.vacated .tile-shape { fill:transparent; stroke-dasharray:1.4px 1.2px; }
 .circular-board-svg .tile-letter { font-size:6.4px; font-weight:800; fill:var(--ink); pointer-events:none; }
 .circular-board-svg .tile.ring-0 .tile-letter { font-size:4.4px; }
-.circular-board-svg .tile-bonus-ring { stroke:#e0b13a; stroke-width:0.9px; stroke-dasharray:1.6px 1.2px; opacity:0.85; }
+.circular-board-svg .tile-bonus-ring, .tutorial-board-svg .tile-bonus-ring { stroke:#e0b13a; stroke-width:0.9px; stroke-dasharray:1.6px 1.2px; opacity:0.85; pointer-events:none; }
 .circular-board-svg .tile.owner-1.locked .tile-letter { fill:#fff; }
 .circular-board-svg .tile.owner-2.locked .tile-letter { fill:var(--ink); }
 .circular-board-svg .tile.vacated .tile-letter, .circular-board-svg .tile.vacated .tile-lock { opacity:0; }
