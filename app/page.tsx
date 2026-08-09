@@ -18,14 +18,21 @@ import {
   type SavedGame,
 } from "./api-client";
 
-export const BOARD_ROWS = 5;
-export const BOARD_COLUMNS = 6;
-export const BOARD_SIZE = BOARD_ROWS * BOARD_COLUMNS;
-export const BOARD_VERSION = "circular-30-v1";
-export const BOARD_RING_COUNTS = [1, 6, 10, 13] as const;
+// The board is 31 tiles, not 30 — an odd total on purpose, so a straight majority can never
+// split evenly and the game can never end in a tie (see decidedOutcome below). The extra tile
+// went onto the outer ring (13 -> 14); the center tile stays a single ring of its own.
+export const BOARD_RING_COUNTS = [1, 6, 10, 14] as const;
+export const BOARD_SIZE = BOARD_RING_COUNTS.reduce((sum, count) => sum + count, 0);
+export const BOARD_VERSION = "circular-31-v1";
 const WIN_MESSAGE_HOLD_MS = 2800;
 
-const BASE_LETTERS = "STARECLOUDPINGMBEACHFORYTENASR".split("");
+// Capturing the center "bullseye" tile (index 0) grants the capturing side an immediate bonus
+// turn instead of passing play. Kept behind a flag so it's a one-line revert if playtesting says
+// otherwise — flip to false to go back to the center being an ordinary tile.
+const CENTER_BONUS_ENABLED = true;
+const CENTER_TILE = 0;
+
+const BASE_LETTERS = "STARECLOUDPINGMBEACHFORYTENASRE".split("");
 const WORDS = `
 ace ache act actor adore aer alert aloe alone alter amber ample angel angle angry ant ante any ape arch are area arm art ate atom aunt auto
 bad bag bar bare bat bath be beach beam bean bear beat bed bee been beer belt bent best bet bird bite boat bone bore born both bowl boy brain bread break bring broad broke brown build burn burst
@@ -126,12 +133,12 @@ const CENTER_TILES = [0];
 
 // Decorative board rendered on the home screen. Spells real words instead of random letters:
 // the center + inner ring reads CLAIMED, the next ring reads STEAL/BOARD, and the outer ring
-// reads STRONGHOLD/WIN — matching the 1/6/10/13 tile counts of each ring exactly.
-const HOME_PREVIEW_LETTERS = "CLAIMEDSTEALBOARDSTRONGHOLDWIN".split("");
+// reads STRONGHOLD/WINS — matching the 1/6/10/14 tile counts of each ring exactly.
+const HOME_PREVIEW_LETTERS = "CLAIMEDSTEALBOARDSTRONGHOLDWINS".split("");
 const HOME_PREVIEW_OWN = [0, 1, 2, 3, 4, 5, 6];
-const HOME_PREVIEW_RIVAL = [27, 28, 29];
+const HOME_PREVIEW_RIVAL = [28, 29, 30];
 
-// Small static rendering of the 30-tile circular board, used for decorative previews (the home
+// Small static rendering of the 31-tile circular board, used for decorative previews (the home
 // screen header and the daily-challenge card) rather than the interactive game board.
 function BoardPreview({ letters, own = [], rival = [], className = "" }: { letters: readonly string[]; own?: readonly number[]; rival?: readonly number[]; className?: string }) {
   return (
@@ -187,10 +194,11 @@ const RING_ANCHORS = OUTER_TILES.filter(index => TILE_NEIGHBORS[index].length ==
 //     always being S/N/R, so the board doesn't feel like it's drawing from the same fixed set each
 //     time. The 3-doubled/6-single split keeps the total at 12 either way, so nothing downstream
 //     (the rare-letter slot math below) has to change game to game.
-//   - The remaining 8 tiles come from the rest of the alphabet (B F H J K P Q V W X Y Z), each
-//     appearing at most once. Fierce draws 8 of those 12 (including J/Q/X/Z), leaving four out at
-//     random each game. Relaxed, Clever, and the Daily challenge exclude J/Q/X/Z entirely, which
-//     leaves exactly 8 unique letters (B F H K P V W Y) for the 8 slots — a clean fit, no repeats.
+//   - The remaining 9 tiles come from the rest of the alphabet (B F H J K P Q V W X Y Z). Fierce
+//     draws 9 of those 12 (including J/Q/X/Z), leaving three out at random each game. Relaxed,
+//     Clever, and the Daily challenge exclude J/Q/X/Z entirely, leaving only 8 safe letters
+//     (B F H K P V W Y) for 9 slots, so one of them repeats once each game — the only letter in
+//     the whole bag that isn't either a fixed count or drawn from a pool with room to spare.
 const VOWELS = new Set(["A", "E", "I", "O", "U"]);
 const GUARANTEED_VOWELS = ["A", "E", "I", "O", "U"];
 const CORE_CONSONANTS = ["S", "T", "R", "N", "G", "L", "D", "C", "M"];
@@ -216,7 +224,7 @@ function shuffleWith<T>(random: () => number, values: T[]) {
   return result;
 }
 
-// Draws a fresh random set of 30 letters (not just a reshuffle of a fixed set) from the fixed-
+// Draws a fresh random set of 31 letters (not just a reshuffle of a fixed set) from the fixed-
 // composition bag above. `random` is injected so the daily challenge can use a seeded version.
 // `allowRareQuad` opens up J/Q/X/Z — true only for Fierce; Relaxed, Clever, and the Daily
 // challenge always stay in the safer range (see seededLetters).
@@ -347,7 +355,9 @@ export function claimTiles(tileIds: number[], owner: 1 | 2, source: Owner[]) {
 // is never over while any tile is unclaimed — deciding *when* to spend your remaining tiles/words
 // is the whole strategic tension of ENCIRCLE, so an early call based on "the score can't change
 // anymore" would cut that off. The only thing this function is for is reading the final tally once
-// every one of the 30 tiles has an owner.
+// every one of the 31 tiles has an owner. The "tie" case is unreachable in practice now that the
+// board is an odd 31 tiles — 31 can't split evenly two ways — but it's left in rather than assumed
+// away, since a resigned/abandoned game or a future board-size change could still hit it.
 export function decidedOutcome(owners: Owner[]): "you" | "rival" | "tie" | null {
   if (!owners.every(Boolean)) return null;
   const you = owners.filter(o => o === 1).length;
@@ -701,7 +711,7 @@ function loadDailyResult(date: string): DailyResult | null {
 const TUTORIAL_SLIDES = [
   {
     kind: "claim", eyebrow: "The basic move", title: "Make words. Take ground.",
-    body: "Choose tiles anywhere on the 30-tile board, then submit your word. Every tile you use becomes yours, so useful words are also territory moves.",
+    body: "Choose tiles anywhere on the 31-tile board, then submit your word. Every tile you use becomes yours, so useful words are also territory moves. Claim the center bullseye tile and you get an immediate bonus turn.",
   },
   {
     kind: "defend", eyebrow: "Think one turn ahead", title: "Protect yours. Break theirs.",
@@ -709,7 +719,7 @@ const TUTORIAL_SLIDES = [
   },
   {
     kind: "steal", eyebrow: "The score swings", title: "Their loss is your gain.",
-    body: "ENCIRCLE is a zero-sum fight for 30 tiles. Use a rival’s letter and its tile changes sides: you gain one while they lose one, making a steal twice as valuable as claiming empty space.",
+    body: "ENCIRCLE is a zero-sum fight for 31 tiles. Use a rival’s letter and its tile changes sides: you gain one while they lose one, making a steal twice as valuable as claiming empty space.",
   },
   {
     kind: "corner", eyebrow: "Build a stronghold", title: "Start on the outer ring.",
@@ -721,7 +731,7 @@ const TUTORIAL_SLIDES = [
   },
 ] as const;
 
-// Builds a full 30-tile letter set for a demo board: the word's letters land on the exact
+// Builds a full 31-tile letter set for a demo board: the word's letters land on the exact
 // tiles the demo selects (in order), everything else is filled with plausible background letters.
 function demoLetters(word: string, selected: readonly number[]) {
   const letters = [...BASE_LETTERS];
@@ -730,10 +740,14 @@ function demoLetters(word: string, selected: readonly number[]) {
 }
 
 // Every "locked"/"unlocking" tile below is mechanically real: it only appears locked because every
-// one of its neighbors on the actual 30-tile board (see TILE_NEIGHBORS) is owned by that player.
+// one of its neighbors on the actual 31-tile board (see TILE_NEIGHBORS) is owned by that player.
+// A couple of these (tile 21's neighbor count, specifically) were tuned for the old 13-tile outer
+// ring and are worth re-checking against the 14-tile ring, though the demos still teach the right
+// concept either way since they're illustrative, not a live simulation.
 const TUTORIAL_DEMOS = {
   // Playing CIRCLES claims the six tiles ringing the center (1-6) plus the center tile itself (0,
-  // landing the final S there), so submitting the word both captures and locks the center in one move.
+  // landing the final S there), so submitting the word both captures the center (a bonus turn —
+  // see CENTER_BONUS_ENABLED) and locks it in the same move.
   claim: {
     word: "CIRCLES",
     selected: [1, 2, 3, 4, 5, 6, 0],
@@ -1100,12 +1114,22 @@ export default function Home() {
     setOwners(nextOwners);
     setPlayed(nextPlayed);
     const decided = decidedOutcome(nextOwners);
-    setTurn(decided ? "done" : "you");
-    setMessage(decided ? describeOutcome(nextOwners, difficulty, move.word, 2) : `${LABELS[difficulty].name} played ${move.word.toUpperCase()}`);
+    // Capturing the center bullseye tile earns an extra turn (see CENTER_BONUS_ENABLED) — check
+    // whether this move actually changed who holds it, not just whether the rival happens to own
+    // it already, so replaying through an own-owned center doesn't re-trigger the bonus.
+    const bonusTurn = !decided && CENTER_BONUS_ENABLED && sourceOwners[CENTER_TILE] !== nextOwners[CENTER_TILE] && nextOwners[CENTER_TILE] === 2;
+    setTurn(decided ? "done" : bonusTurn ? "rival" : "you");
+    setMessage(decided
+      ? describeOutcome(nextOwners, difficulty, move.word, 2)
+      : bonusTurn
+        ? `${LABELS[difficulty].name} played ${move.word.toUpperCase()} and took the bullseye — bonus turn.`
+        : `${LABELS[difficulty].name} played ${move.word.toUpperCase()}`);
     if (decided) {
       if (mode === "daily" && dailyDate) saveDailyResult(dailyDate, { letters, owners: nextOwners, played: nextPlayed, message: describeOutcome(nextOwners, difficulty, move.word, 2) });
       window.setTimeout(() => setResultsOpen(true), WIN_MESSAGE_HOLD_MS);
+      return;
     }
+    if (bonusTurn) window.setTimeout(() => rivalMove(nextOwners, nextPlayed), 3000);
   }, [celebrateClaim, dailyDate, difficulty, letters, mode]);
 
   const submit = async () => {
@@ -1155,6 +1179,13 @@ export default function Home() {
       setMessage(finishedMessage);
       if (mode === "daily" && dailyDate) saveDailyResult(dailyDate, { letters, owners: nextOwners, played: nextPlayed, message: finishedMessage });
       window.setTimeout(() => setResultsOpen(true), WIN_MESSAGE_HOLD_MS);
+      return;
+    }
+    // Same bullseye bonus as the rival gets in rivalMove above — only fires when this move actually
+    // changed the center's owner to you.
+    if (CENTER_BONUS_ENABLED && owners[CENTER_TILE] !== nextOwners[CENTER_TILE] && nextOwners[CENTER_TILE] === 1) {
+      setTurn("you");
+      setMessage("Bullseye! Bonus turn — go again.");
       return;
     }
     setTurn("rival");
@@ -1313,12 +1344,13 @@ export default function Home() {
   if (screen === "rules") return (
     <><main className="rules-shell">
       <button className="back" onClick={() => setScreen("home")} aria-label="Back">←</button>
-      <p className="eyebrow">Three simple rules</p>
+      <p className="eyebrow">Four simple rules</p>
       <h2>Claim the tiles</h2>
       <div className="rules-list">
         <article><span>1</span><div><h3>Make a word</h3><p>Tap letters in any order. Every letter you use becomes yours.</p></div></article>
         <article><span>2</span><div><h3>Steal their letters</h3><p>Use a rival’s letter in your word and it changes to your color.</p></div></article>
         <article><span>3</span><div><h3>Build a stronghold</h3><p>Surround a letter with your color to lock it. Locked letters can’t be stolen.</p></div></article>
+        <article><span>4</span><div><h3>Capture the bullseye</h3><p>The board has 31 tiles, so there’s always a winner — no ties. The center tile is marked with a dotted ring: claim it in a word and you get an extra turn.</p></div></article>
       </div>
       <button className="primary" onClick={() => newGame("relaxed")}>Play a relaxed game</button>
     </main>{tutorialModal}{accountModal}</>
@@ -1398,6 +1430,16 @@ export default function Home() {
                   {layout.ring === 0
                     ? <circle cx={50} cy={50} r={layout.rOut} {...shapeProps} />
                     : <path d={sectorPath(layout.rIn, layout.rOut, layout.a0, layout.a1)} {...shapeProps} />}
+                  {CENTER_BONUS_ENABLED && layout.ring === 0 && (
+                    <circle
+                      className="tile-bonus-ring"
+                      cx={50}
+                      cy={50}
+                      r={layout.rOut - 1.2}
+                      fill="none"
+                      pointerEvents="none"
+                    />
+                  )}
                   <text className="tile-letter" dy="0.32em" textAnchor="middle" x={tx} y={ty}>{letter}</text>
                   {locked[i] && <text className="tile-lock" dy="0.32em" textAnchor="middle" x={tx} y={ty - (layout.ring === 0 ? layout.rOut : layout.rOut - layout.rIn) * .42}>🔑</text>}
                 </g>

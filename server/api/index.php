@@ -198,7 +198,7 @@ function latest_game(int $userId): ?array {
     $row = $statement->fetch();
     if (!$row) return null;
     $game = json_decode((string) $row['state_json'], true);
-    return is_array($game) && ($game['boardVersion'] ?? '') === 'circular-30-v1' ? $game : null;
+    return is_array($game) && ($game['boardVersion'] ?? '') === 'circular-31-v1' ? $game : null;
 }
 
 function word_set(): array {
@@ -265,9 +265,9 @@ function validated_game(array $input): array {
     $dailyDate = $input['dailyDate'] ?? null;
 
     if (!preg_match('/^[A-Za-z0-9-]{8,64}$/', $gameId)) respond(['error' => 'Invalid game.'], 422);
-    if ($boardVersion !== 'circular-30-v1') respond(['error' => 'Invalid board version.'], 422);
+    if ($boardVersion !== 'circular-31-v1') respond(['error' => 'Invalid board version.'], 422);
     if (!in_array($difficulty, ['relaxed', 'clever', 'fierce'], true)) respond(['error' => 'Invalid game.'], 422);
-    if (!is_array($letters) || count($letters) !== 30 || !is_array($owners) || count($owners) !== 30) respond(['error' => 'Invalid game.'], 422);
+    if (!is_array($letters) || count($letters) !== 31 || !is_array($owners) || count($owners) !== 31) respond(['error' => 'Invalid game.'], 422);
     $cleanLetters = [];
     $cleanOwners = [];
     foreach ($letters as $letter) {
