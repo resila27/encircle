@@ -587,14 +587,14 @@ export function selectRivalMove(sourceOwners: Owner[], sourcePlayed: PlayedWord[
     // right past a real finishing word just because that word wasn't in its curated list. Once the
     // board is down to a handful of blanks, also check the full dictionary (loaded once and cached
     // — see loadFullDictionary above) so it works as hard as a human would to close the game out.
-    // Relaxed stays on its small curated list here on purpose — it's meant to be the easy/beginner
-    // difficulty, and letting it reach into a 200k+ word dictionary for a closing move (e.g. an
-    // obscure finisher) defeats the point of "relaxed." The dictionary is a full Scrabble-style
-    // word list (it includes plenty of words no casual player would recognize), so even for
-    // Clever/Fierce the widened search is capped at 8 letters — long enough to catch real finishing
-    // words, short enough to stay away from things like BIVOUACKED or REMANUFACTURING.
+    // Relaxed and Clever stay on the small curated list here on purpose. Relaxed is meant to be the
+    // easy/beginner difficulty, and Clever is meant to be the middle difficulty — letting either
+    // reach into a 200k+ word dictionary for a closing move (e.g. an obscure finisher like EVONYMUS)
+    // defeats the point of both. Only Fierce, the "throw everything at it" difficulty, gets the
+    // widened dictionary fallback. Even there it's capped at 8 letters — long enough to catch real
+    // finishing words, short enough to stay away from things like BIVOUACKED or REMANUFACTURING.
     const WIDENED_FINISHER_MAX_LENGTH = 8;
-    const finisherPool = blanks <= 12 && difficulty !== "relaxed" && dictionaryWords?.length
+    const finisherPool = blanks <= 12 && difficulty === "fierce" && dictionaryWords?.length
       ? [...new Set([
           ...availableCandidates,
           ...dictionaryWords.filter(word => word.length >= minLength && word.length <= Math.min(dynamicMax, WIDENED_FINISHER_MAX_LENGTH) && !blocksPlayedWord(word, usedWords) && canForm(word, letters)),
