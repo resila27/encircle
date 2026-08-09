@@ -1,6 +1,6 @@
 "use client";
 
-import { useCallback, useEffect, useMemo, useRef, useState, type CSSProperties, type KeyboardEvent as ReactKeyboardEvent, type PointerEvent as ReactPointerEvent } from "react";
+import { useCallback, useEffect, useLayoutEffect, useMemo, useRef, useState, type CSSProperties, type KeyboardEvent as ReactKeyboardEvent, type PointerEvent as ReactPointerEvent } from "react";
 import { AccountModal } from "./AccountModal";
 import { COMPOUND_WORDS, EXTENDED_WORDS, STRATEGY_WORDS } from "./strategy-words";
 import {
@@ -800,6 +800,29 @@ const TUTORIAL_DEMOS = {
 
 const hasTutorialTile = (tiles: readonly number[], tile: number) => tiles.includes(tile);
 
+// Shrinks an element's font size just enough for its text to fit on one line, instead of letting the
+// browser wrap or break a long word mid-letter (e.g. "MOTHERBOARDS" splitting into "MOTHERBOAR"/"DS").
+// Re-measures whenever the text changes; the element itself needs white-space:nowrap in CSS.
+function useFitFontSize<T extends HTMLElement = HTMLElement>(text: string, active: boolean, maxPx = 20, minPx = 8) {
+  const ref = useRef<T | null>(null);
+  const [fontSize, setFontSize] = useState(maxPx);
+  useLayoutEffect(() => {
+    const el = ref.current;
+    if (!el || !active) return;
+    let size = maxPx;
+    el.style.fontSize = `${size}px`;
+    while (el.scrollWidth > el.clientWidth && size > minPx) {
+      size -= 1;
+      el.style.fontSize = `${size}px`;
+    }
+    setFontSize(size);
+    // Re-measuring depends on the element actually being mounted, not just the text changing — the
+    // results modal (and thus this button) can mount again showing the *same* word as last time,
+    // which wouldn't otherwise re-trigger this effect since `text` didn't change.
+  }, [text, active, maxPx, minPx]);
+  return { ref, fontSize };
+}
+
 function TutorialScore({ after, before }: { after: [number, number]; before: [number, number] }) {
   return (
     <div className="tutorial-score" aria-hidden="true">
@@ -940,6 +963,7 @@ export default function Home() {
   const projectedRivalScore = projectedOwners.filter(o => o === 2).length;
   const showingProjectedScore = selected.length > 0 && turn === "you";
   const longestWord = played.filter(play => play.owner === 1).reduce((best, play) => play.word.length > best.length ? play.word : best, "");
+  const bestWordFit = useFitFontSize<HTMLButtonElement>(longestWord ? longestWord.toUpperCase() : "—", resultsOpen, 20, 8);
   const biggestSteal = played.filter(play => play.owner === 1).reduce((best, play) => Math.max(best, play.captures ?? 0), 0);
   const result = yourScore > rivalScore ? "win" : yourScore < rivalScore ? "loss" : "tie";
   // Trust the saved results snapshot itself, not just the old completion flag — a stale flag with
@@ -1477,7 +1501,7 @@ export default function Home() {
           <h2 id="results-title">{result === "win" ? "Tiles claimed!" : result === "loss" ? "The rival held on." : "Deadlocked."}</h2>
           <div className="final-score"><strong>{yourScore}</strong><span>–</span><strong>{rivalScore}</strong></div>
           <div className="result-highlights">
-            <div><span>Your best word</span><button title={longestWord.toUpperCase()} type="button" onClick={() => longestWord && void lookUpWord(longestWord)}>{longestWord ? longestWord.toUpperCase() : "—"}</button></div>
+            <div><span>Your best word</span><button ref={bestWordFit.ref} style={{ fontSize: bestWordFit.fontSize }} title={longestWord.toUpperCase()} type="button" onClick={() => longestWord && void lookUpWord(longestWord)}>{longestWord ? longestWord.toUpperCase() : "—"}</button></div>
             <div><span>Biggest steal</span><strong>{biggestSteal}</strong></div>
             {mode === "daily" && <div><span>Daily standing</span>{dailyStanding ? <strong>{`#${dailyStanding.rank} of ${dailyStanding.total}`}</strong> : account ? <strong>Calculating…</strong> : <button className="daily-standing-signin" onClick={() => setAccountOpen(true)} type="button">Sign in</button>}</div>}
           </div>
