@@ -286,15 +286,45 @@ function blocksPlayedWord(candidate: string, playedWords: Iterable<string>) {
 }
 
 const WORD_PREFIXES = ["re", "un", "mis", "dis", "pre", "out", "over"];
-const WORD_SUFFIXES = ["s", "es", "ed", "ing", "er", "ers", "est", "ly", "ness", "less", "ful"];
 
+// A longer word "contains" a shorter one whenever it's a literal prefix extension of it (SMOKE ->
+// SMOKERS, CHOSE -> CHOSEN, CRASH -> CRASHING) — this is deliberately the same test blocksPlayedWord
+// uses for whether an already-played word blocks a shorter root from being played later, so the two
+// stay in sync: whatever counts as "the rival could have blocked this by playing the longer form
+// first" here is exactly what would in fact block it once played. A plain startsWith check also
+// covers every case the old hardcoded suffix list did (and then some, like irregular forms such as
+// CHOSEN) without needing to enumerate suffixes by hand. Prepended forms (un/re/dis + word) aren't
+// prefix extensions, so those still need the explicit WORD_PREFIXES check.
 function isLongerForm(longer: string, shorter: string) {
   if (longer.length <= shorter.length) return false;
+  if (longer.startsWith(shorter)) return true;
   if (WORD_PREFIXES.some(prefix => longer === `${prefix}${shorter}`)) return true;
-  if (WORD_SUFFIXES.some(suffix => longer === `${shorter}${suffix}`)) return true;
-  if (shorter.endsWith("e") && longer === `${shorter.slice(0, -1)}ing`) return true;
-  if (shorter.endsWith("y") && longer === `${shorter.slice(0, -1)}ies`) return true;
   return false;
+}
+
+// Binary-searches the (alphabetically sorted, see build-server.mjs) full dictionary for words that
+// are a prefix extension of `root` — i.e. real dictionary words the rival could play instead of the
+// bare root to claim more tiles and block the human from stealing that extension later. Used to plug
+// gaps in the rival's small curated word list (BOT_WORDS), which doesn't carry every inflected form
+// of every word it knows.
+function findDictionaryExtensions(root: string, dictionaryWords: string[], maxLength: number): string[] {
+  const lowerBound = (prefix: string) => {
+    let lo = 0;
+    let hi = dictionaryWords.length;
+    while (lo < hi) {
+      const mid = (lo + hi) >>> 1;
+      if (dictionaryWords[mid] < prefix) lo = mid + 1; else hi = mid;
+    }
+    return lo;
+  };
+  const start = lowerBound(root);
+  const end = lowerBound(`${root}￿`);
+  const found: string[] = [];
+  for (let i = start; i < end && found.length < 40; i++) {
+    const candidate = dictionaryWords[i];
+    if (candidate.length > root.length && candidate.length <= maxLength) found.push(candidate);
+  }
+  return found;
 }
 
 function monthKey(date: string) {
@@ -635,9 +665,40 @@ export function selectRivalMove(sourceOwners: Owner[], sourcePlayed: PlayedWord[
       return { word, ids, nextOwners, score: 9999 + captures, captures };
     }
   }
-  const candidates = difficulty === "clever"
-    ? availableCandidates.filter(word => !availableCandidates.some(longer => isLongerForm(longer, word)))
+  // BOT_WORDS (the rival's curated vocabulary) is missing most inflected forms of the words it does
+  // know — it might have SMOKE without SMOKERS, CHOSE without CHOSEN, CRASH without CRASHING. That
+  // meant the isLongerForm dedup below had nothing to prefer over the short root, so the rival played
+  // it, leaving the longer extension sitting there for the human to steal on their next turn. Look up
+  // real dictionary extensions of each candidate root (and, for silent-e words, of the e-dropped stem
+  // too — SMOKE -> SMOK- -> SMOKER/SMOKING/SMOKED) so the rival can actually consider playing the
+  // longer, more defensive word instead. Only for Clever/Fierce — Relaxed keeps its narrower vocabulary
+  // on purpose.
+  const dictionaryExtendedCandidates = (difficulty === "clever" || difficulty === "fierce") && dictionaryWords?.length
+    ? (() => {
+        const availableCandidateSet = new Set(availableCandidates);
+        const extended = new Set<string>();
+        availableCandidates.forEach(word => {
+          const bases = word.endsWith("e") ? [word, word.slice(0, -1)] : [word];
+          bases.forEach(base => {
+            findDictionaryExtensions(base, dictionaryWords, dynamicMax).forEach(ext => extended.add(ext));
+          });
+        });
+        return [...extended].filter(ext => !availableCandidateSet.has(ext) && !blocksPlayedWord(ext, usedWords) && canForm(ext, letters));
+      })()
+    : [];
+  const candidatesBeforeVariety = difficulty === "clever" || difficulty === "fierce"
+    ? (() => {
+        const combined = [...new Set([...availableCandidates, ...dictionaryExtendedCandidates])];
+        return combined.filter(word => !combined.some(longer => isLongerForm(longer, word)));
+      })()
     : availableCandidates;
+  // The recentRepeat score penalty below wasn't enough on its own either — a handful of words
+  // (SCHOOLHOUSE, CAMPGROUND, PLAYERS, BUILDINGS...) that fit nearly any letter draw kept scoring so
+  // far above everything else that the penalty couldn't dethrone them. Same fix as the endgame
+  // restraint above: hard-exclude recently played words as long as at least one non-recent candidate
+  // still exists, and only fall back to a recent word when it's genuinely the only legal move.
+  const freshCandidates = candidatesBeforeVariety.filter(word => !recentSet.has(word));
+  const candidates = freshCandidates.length > 0 ? freshCandidates : candidatesBeforeVariety;
   const scoreCandidate = (word: string, ids: number[]) => {
     const protectedNow = protectedTiles(sourceOwners);
     const captures = ids.filter(i => sourceOwners[i] === 1 && !protectedNow[i]).length;
@@ -1080,7 +1141,8 @@ export default function Home() {
   }, []);
 
   // Warm the full-dictionary cache as soon as the app loads so it's ready well before the rival
-  // ever needs it for an endgame finishing move (see loadFullDictionary / selectRivalMove).
+  // needs it — both for an endgame finishing move and, from turn one, for finding real dictionary
+  // extensions of its own curated words (see loadFullDictionary / selectRivalMove).
   useEffect(() => { void loadFullDictionary(); }, []);
 
   useEffect(() => {
