@@ -564,8 +564,19 @@ function bestReplySwing(source: Owner[], letters: string[], usedWords: Set<strin
   }, 0);
 }
 
-export function selectRivalMove(sourceOwners: Owner[], sourcePlayed: PlayedWord[], letters: string[], difficulty: Difficulty, deterministic = false, dictionaryWords?: string[]) {
+// Once the board is down to this many (or fewer) truly unclaimed tiles, grabbing *some* of them
+// without clearing the rest just hands the human an easy, uncontested finish on what's left — see
+// the "partialEndgameGrab" penalty in scoreCandidate below. Tuned from actual reports of the rival
+// taking 2 of the last 4 blanks and leaving a trivial 2-tile mop-up.
+const ENDGAME_BLANK_THRESHOLD = 6;
+
+export function selectRivalMove(sourceOwners: Owner[], sourcePlayed: PlayedWord[], letters: string[], difficulty: Difficulty, deterministic = false, dictionaryWords?: string[], recentWords?: string[]) {
   const usedWords = new Set(sourcePlayed.map(play => play.word));
+  // Words the rival has played recently in past games at this difficulty (see recordRivalWord /
+  // loadRecentRivalWords) get scored down, not excluded — without this, the same handful of
+  // long/compound words that happen to fit almost any letter draw (SCHOOLHOUSE, CAMPGROUND, etc.)
+  // dominate the top of every ranking and get replayed constantly.
+  const recentSet = new Set(recentWords ?? []);
   // Compounds (WORDPLAY-style) are capped per game so the rival doesn't lean on them every turn;
   // prefixes, suffixes, and plurals (EXTENDED_WORD_SET) stay unrestricted at every difficulty.
   const compoundWordsPlayed = sourcePlayed.filter(play => play.owner === 2 && COMPOUND_WORD_SET.has(play.word)).length;
@@ -636,11 +647,20 @@ export function selectRivalMove(sourceOwners: Owner[], sourcePlayed: PlayedWord[
     const strategicSwing = fiercePosition(nextOwners) - fiercePosition(sourceOwners);
     const cornerSwing = cornerPressure(nextOwners, 2) - cornerPressure(sourceOwners, 2);
     const powerBonus = POWER_WORD_SET.has(word) ? Math.min(5, word.length * .35) : 0;
+    // Grabbing some, but not all, of a dwindling pool of neutral tiles is exactly the "leaves an
+    // easy 2-tile mop-up" pattern reported — so once blanks are scarce, only claiming every last one
+    // of them (an actual finish) or none of them (a pure steal elsewhere) is left unpenalized.
+    const clearsRemainingBlanks = blanks > 0 && open === blanks;
+    const partialEndgameGrab = blanks > 0 && blanks <= ENDGAME_BLANK_THRESHOLD && open > 0 && !clearsRemainingBlanks;
+    // Playing the same handful of words every game (the ones that happen to fit almost any letter
+    // draw) reads as repetitive rather than clever, so a word played recently at this difficulty is
+    // scored down — not banned — until it ages out of the recent-words list.
+    const recentRepeat = recentSet.has(word);
     const score = difficulty === "fierce"
-      ? strategicSwing * 1.65 + cornerSwing * 1.8 + captures * 9 + word.length * .8 + powerBonus
+      ? strategicSwing * 1.65 + cornerSwing * 1.8 + captures * 9 + word.length * .8 + powerBonus - (partialEndgameGrab ? open * 14 : 0) - (recentRepeat ? 16 : 0)
       : difficulty === "clever"
-        ? swing * .62 + captures * 4.1 + open * .65 + word.length * .72 + (EXTENDED_WORD_SET.has(word) ? 2.4 : 0) + (COMPOUND_WORD_SET.has(word) ? 1.2 : 0)
-        : word.length + captures * 1.5 + open * .5 + Math.random() * 4;
+        ? swing * .62 + captures * 4.1 + open * .65 + word.length * .72 + (EXTENDED_WORD_SET.has(word) ? 2.4 : 0) + (COMPOUND_WORD_SET.has(word) ? 1.2 : 0) - (partialEndgameGrab ? open * 9 : 0) - (recentRepeat ? 10 : 0)
+        : word.length + captures * 1.5 + open * .5 + Math.random() * 4 - (partialEndgameGrab ? open * 6 : 0) - (recentRepeat ? 6 : 0);
     return { word, ids, nextOwners, score, captures };
   };
   const quickDifficulty = difficulty === "fierce" ? "clever" : difficulty;
@@ -708,6 +728,31 @@ function loadDailyResult(date: string): DailyResult | null {
   } catch {
     return null;
   }
+}
+
+// How many of the rival's most recent words (per difficulty) get remembered and scored down in
+// selectRivalMove — see the "recentRepeat" penalty there. Kept out of localStorage's normal per-game
+// keys since it needs to persist and accumulate across games, not reset each time.
+const RECENT_RIVAL_WORD_LIMIT = 24;
+
+function recentRivalWordsKey(difficulty: Difficulty) {
+  return `gridlock-rival-recent-${difficulty}`;
+}
+
+function loadRecentRivalWords(difficulty: Difficulty): string[] {
+  if (typeof window === "undefined") return [];
+  try {
+    const parsed = JSON.parse(window.localStorage.getItem(recentRivalWordsKey(difficulty)) ?? "[]");
+    return Array.isArray(parsed) ? parsed.filter((word): word is string => typeof word === "string") : [];
+  } catch {
+    return [];
+  }
+}
+
+function recordRivalWord(difficulty: Difficulty, word: string) {
+  if (typeof window === "undefined") return;
+  const next = [...loadRecentRivalWords(difficulty).filter(existing => existing !== word), word].slice(-RECENT_RIVAL_WORD_LIMIT);
+  window.localStorage.setItem(recentRivalWordsKey(difficulty), JSON.stringify(next));
 }
 
 const TUTORIAL_SLIDES = [
@@ -1136,8 +1181,13 @@ export default function Home() {
   }, []);
 
   const rivalMove = useCallback((sourceOwners: Owner[], sourcePlayed: PlayedWord[]) => {
-    const move = selectRivalMove(sourceOwners, sourcePlayed, letters, difficulty, mode === "daily", fullDictionaryCache ?? undefined);
+    // Daily challenge boards must play out identically for every player for the leaderboard to be a
+    // fair comparison, so the recent-words variety penalty (which depends on this device's local
+    // history) only applies to regular classic games, not daily ones.
+    const recentWords = mode === "daily" ? undefined : loadRecentRivalWords(difficulty);
+    const move = selectRivalMove(sourceOwners, sourcePlayed, letters, difficulty, mode === "daily", fullDictionaryCache ?? undefined, recentWords);
     if (!move) { setTurn("you"); setMessage("Your turn"); return; }
+    if (mode !== "daily") recordRivalWord(difficulty, move.word);
     const nextOwners = move.nextOwners;
     const nextPlayed = [...sourcePlayed, { word: move.word, owner: 2 as const, captures: move.captures }];
     celebrateClaim(move.ids, sourceOwners, nextOwners, 2);
