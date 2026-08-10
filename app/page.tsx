@@ -661,14 +661,30 @@ export function selectRivalMove(sourceOwners: Owner[], sourcePlayed: PlayedWord[
       : difficulty === "clever"
         ? swing * .62 + captures * 4.1 + open * .65 + word.length * .72 + (EXTENDED_WORD_SET.has(word) ? 2.4 : 0) + (COMPOUND_WORD_SET.has(word) ? 1.2 : 0) - (partialEndgameGrab ? open * 9 : 0) - (recentRepeat ? 10 : 0)
         : word.length + captures * 1.5 + open * .5 + Math.random() * 4 - (partialEndgameGrab ? open * 6 : 0) - (recentRepeat ? 6 : 0);
-    return { word, ids, nextOwners, score, captures };
+    return { word, ids, nextOwners, score, captures, open };
   };
   const quickDifficulty = difficulty === "fierce" ? "clever" : difficulty;
-  const quickRanked = candidates.map(word => scoreCandidate(word, chooseTiles(word, letters, sourceOwners, quickDifficulty)))
+  const quickRankedAll = candidates.map(word => scoreCandidate(word, chooseTiles(word, letters, sourceOwners, quickDifficulty)))
     .sort((a, b) => b.score - a.score);
-  const ranked = difficulty === "fierce"
+  // A score penalty alone (see partialEndgameGrab above) wasn't strict enough — the rival still took
+  // one of the last few blanks when a high-scoring word happened to touch one. So once blanks are
+  // scarce, this hard-filters down to only moves that touch zero neutral tiles, as long as at least
+  // one such move actually exists — the rival keeps playing (stealing/rearranging claimed tiles)
+  // without ever reaching into the dwindling blank pool until it truly has no other legal move.
+  const endgameSafeMoves = quickRankedAll.filter(move => move.open === 0);
+  const quickRanked = blanks > 0 && blanks <= ENDGAME_BLANK_THRESHOLD && endgameSafeMoves.length > 0
+    ? endgameSafeMoves
+    : quickRankedAll;
+  // Fierce re-picks tiles with its own beam search below, which can land on a different tile for the
+  // same word than the quick pass did — including, in rare cases, a neutral one the filter above was
+  // meant to rule out. Re-check after the re-pick so the endgame guarantee actually holds for Fierce.
+  const rerankedFierce = difficulty === "fierce"
     ? quickRanked.slice(0, 40).map(move => scoreCandidate(move.word, chooseTiles(move.word, letters, sourceOwners, "fierce"))).sort((a, b) => b.score - a.score)
     : quickRanked;
+  const fierceSafeMoves = rerankedFierce.filter(move => move.open === 0);
+  const ranked = difficulty === "fierce" && blanks > 0 && blanks <= ENDGAME_BLANK_THRESHOLD && fierceSafeMoves.length > 0
+    ? fierceSafeMoves
+    : rerankedFierce;
   const strategic = difficulty === "fierce"
     ? ranked.slice(0, 12).map(move => ({
         ...move,
