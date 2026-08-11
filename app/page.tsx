@@ -607,18 +607,22 @@ export function selectRivalMove(sourceOwners: Owner[], sourcePlayed: PlayedWord[
   // long/compound words that happen to fit almost any letter draw (SCHOOLHOUSE, CAMPGROUND, etc.)
   // dominate the top of every ranking and get replayed constantly.
   const recentSet = new Set(recentWords ?? []);
-  // Compounds (WORDPLAY-style) are capped per game so the rival doesn't lean on them every turn;
-  // prefixes, suffixes, and plurals (EXTENDED_WORD_SET) stay unrestricted at every difficulty.
-  const compoundWordsPlayed = sourcePlayed.filter(play => play.owner === 2 && COMPOUND_WORD_SET.has(play.word)).length;
-  // Turn number counting every play so far, both sides — a compound word as the rival's opening
-  // move or two reads as showing off rather than playing naturally, so non-fierce difficulties
-  // hold off on them until turn 5.
+  // "Showy" words — compounds (WORDPLAY-style) and anything only found via the dictionary-extension
+  // search below (DEALERSHIP, FACTORSHIP, ARCHANGELS...) rather than the rival's own curated list —
+  // are capped per game so the rival doesn't lean on them every single turn; prefixes, suffixes, and
+  // plurals it actually knows (EXTENDED_WORD_SET, part of BOT_WORDS) stay unrestricted at every
+  // difficulty since those are its normal vocabulary, not a special case.
+  const showyWordsPlayed = sourcePlayed.filter(play => play.owner === 2 && (COMPOUND_WORD_SET.has(play.word) || !BOT_WORDS.includes(play.word))).length;
+  // Turn number counting every play so far, both sides — a showy word as the rival's opening move or
+  // two reads as showing off rather than playing naturally, so non-fierce difficulties hold off on
+  // them until turn 5.
   const turnNumber = sourcePlayed.length + 1;
   const blanks = sourceOwners.filter(owner => owner === 0).length;
   const maxLength = difficulty === "fierce" ? 15 : difficulty === "clever" ? 10 : 6;
   const minLength = blanks <= 8 ? 2 : 3;
   const dynamicMax = Math.max(minLength, maxLength);
-  const availableCandidates = BOT_WORDS.filter(word => word.length >= minLength && word.length <= dynamicMax && !blocksPlayedWord(word, usedWords) && (difficulty === "fierce" || !COMPOUND_WORD_SET.has(word) || (compoundWordsPlayed < MAX_NON_FIERCE_COMPOUND_WORDS && turnNumber >= 5)) && canForm(word, letters));
+  const showyWordsAllowed = difficulty === "fierce" || (showyWordsPlayed < MAX_NON_FIERCE_COMPOUND_WORDS && turnNumber >= 5);
+  const availableCandidates = BOT_WORDS.filter(word => word.length >= minLength && word.length <= dynamicMax && !blocksPlayedWord(word, usedWords) && (showyWordsAllowed || !COMPOUND_WORD_SET.has(word)) && canForm(word, letters));
 
   if (blanks > 0) {
     // decidedOutcome only returns non-null once every tile is claimed, so this only matches a word
@@ -672,8 +676,11 @@ export function selectRivalMove(sourceOwners: Owner[], sourcePlayed: PlayedWord[
   // real dictionary extensions of each candidate root (and, for silent-e words, of the e-dropped stem
   // too — SMOKE -> SMOK- -> SMOKER/SMOKING/SMOKED) so the rival can actually consider playing the
   // longer, more defensive word instead. Only for Clever/Fierce — Relaxed keeps its narrower vocabulary
-  // on purpose.
-  const dictionaryExtendedCandidates = (difficulty === "clever" || difficulty === "fierce") && dictionaryWords?.length
+  // on purpose. This search isn't picky about *how much* longer the match is (DEALERSHIP, FACTORSHIP,
+  // ARCHANGELS all turned up this way too), so every word it finds counts as a "showy" word toward
+  // the same per-game cap as compounds — otherwise every single turn ends up being an elaborate word,
+  // not just a couple.
+  const dictionaryExtendedCandidates = (difficulty === "clever" || difficulty === "fierce") && showyWordsAllowed && dictionaryWords?.length
     ? (() => {
         const availableCandidateSet = new Set(availableCandidates);
         const extended = new Set<string>();
