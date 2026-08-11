@@ -724,11 +724,18 @@ export function selectRivalMove(sourceOwners: Owner[], sourcePlayed: PlayedWord[
     // draw) reads as repetitive rather than clever, so a word played recently at this difficulty is
     // scored down — not banned — until it ages out of the recent-words list.
     const recentRepeat = recentSet.has(word);
+    // The rival never went out of its way to surround the center bullseye for the bonus turn — it
+    // only ever happened by accident. This doesn't make it hunt for the lock proactively (that would
+    // take real multi-turn planning), but whenever a candidate move it's already considering would
+    // complete the lock, give it a real nudge toward taking that opportunity instead of an
+    // equally-scored alternative.
+    const centerNewlyLocked = CENTER_BONUS_ENABLED && protectedTiles(nextOwners)[CENTER_TILE] && !protectedNow[CENTER_TILE] && nextOwners[CENTER_TILE] === 2;
+    const centerBonusIncentive = centerNewlyLocked ? 30 : 0;
     const score = difficulty === "fierce"
-      ? strategicSwing * 1.65 + cornerSwing * 1.8 + captures * 9 + word.length * .8 + powerBonus - (partialEndgameGrab ? open * 14 : 0) - (recentRepeat ? 16 : 0)
+      ? strategicSwing * 1.65 + cornerSwing * 1.8 + captures * 9 + word.length * .8 + powerBonus - (partialEndgameGrab ? open * 14 : 0) - (recentRepeat ? 16 : 0) + centerBonusIncentive
       : difficulty === "clever"
-        ? swing * .62 + captures * 4.1 + open * .65 + word.length * .72 + (EXTENDED_WORD_SET.has(word) ? 2.4 : 0) + (COMPOUND_WORD_SET.has(word) ? 1.2 : 0) - (partialEndgameGrab ? open * 9 : 0) - (recentRepeat ? 10 : 0)
-        : word.length + captures * 1.5 + open * .5 + Math.random() * 4 - (partialEndgameGrab ? open * 6 : 0) - (recentRepeat ? 6 : 0);
+        ? swing * .62 + captures * 4.1 + open * .65 + word.length * .72 + (EXTENDED_WORD_SET.has(word) ? 2.4 : 0) + (COMPOUND_WORD_SET.has(word) ? 1.2 : 0) - (partialEndgameGrab ? open * 9 : 0) - (recentRepeat ? 10 : 0) + centerBonusIncentive
+        : word.length + captures * 1.5 + open * .5 + Math.random() * 4 - (partialEndgameGrab ? open * 6 : 0) - (recentRepeat ? 6 : 0) + centerBonusIncentive;
     return { word, ids, nextOwners, score, captures, open };
   };
   const quickDifficulty = difficulty === "fierce" ? "clever" : difficulty;
@@ -759,8 +766,12 @@ export function selectRivalMove(sourceOwners: Owner[], sourcePlayed: PlayedWord[
         score: move.score - bestReplySwing(move.nextOwners, letters, new Set([...usedWords, move.word])) * 1.08,
       })).sort((a, b) => b.score - a.score)
     : ranked;
+  // Clever's non-deterministic pool was only 7 deep, and combined with a short 24-word memory
+  // window that meant the same handful of top-scoring words (REBUILD, BUILDERS, COUNTLESS...) kept
+  // resurfacing across games. Widening the pool gives real variety more room to matter without
+  // touching the deterministic/daily pool (kept at 5 so daily boards stay fair and repeatable).
   const pool = difficulty === "relaxed" ? strategic.filter(move => move.word.length <= 5).slice(0, 18)
-    : difficulty === "clever" ? strategic.slice(0, deterministic ? 5 : 7) : strategic.slice(0, 1);
+    : difficulty === "clever" ? strategic.slice(0, deterministic ? 5 : 12) : strategic.slice(0, 1);
   return deterministic ? pool[Math.min(1, pool.length - 1)] ?? ranked[0] ?? null
     : pool[Math.floor(Math.random() * Math.max(pool.length, 1))] ?? ranked[0] ?? null;
 }
@@ -817,7 +828,7 @@ function loadDailyResult(date: string): DailyResult | null {
 // How many of the rival's most recent words (per difficulty) get remembered and scored down in
 // selectRivalMove — see the "recentRepeat" penalty there. Kept out of localStorage's normal per-game
 // keys since it needs to persist and accumulate across games, not reset each time.
-const RECENT_RIVAL_WORD_LIMIT = 24;
+const RECENT_RIVAL_WORD_LIMIT = 60;
 
 function recentRivalWordsKey(difficulty: Difficulty) {
   return `gridlock-rival-recent-${difficulty}`;
