@@ -607,12 +607,14 @@ export function selectRivalMove(sourceOwners: Owner[], sourcePlayed: PlayedWord[
   // long/compound words that happen to fit almost any letter draw (SCHOOLHOUSE, CAMPGROUND, etc.)
   // dominate the top of every ranking and get replayed constantly.
   const recentSet = new Set(recentWords ?? []);
-  // "Showy" words — compounds (WORDPLAY-style) and anything only found via the dictionary-extension
-  // search below (DEALERSHIP, FACTORSHIP, ARCHANGELS...) rather than the rival's own curated list —
-  // are capped per game so the rival doesn't lean on them every single turn; prefixes, suffixes, and
-  // plurals it actually knows (EXTENDED_WORD_SET, part of BOT_WORDS) stay unrestricted at every
-  // difficulty since those are its normal vocabulary, not a special case.
-  const showyWordsPlayed = sourcePlayed.filter(play => play.owner === 2 && (COMPOUND_WORD_SET.has(play.word) || !BOT_WORDS.includes(play.word))).length;
+  // "Showy" words — compounds (WORDPLAY-style), the prefix/suffix extended forms (BUILDINGS,
+  // REPLAYING...), and anything only found via the dictionary-extension search below (DEALERSHIP,
+  // FACTORSHIP, ARCHANGELS...) rather than the rival's own basic word list — are capped per game so
+  // the rival doesn't lean on them every single turn. EXTENDED_WORD_SET used to be treated as
+  // unrestricted "normal vocabulary," but it's exactly as showy as the compound list (and gets its
+  // own score bonus below), so leaving it ungated meant the rival kept opening games with BUILDINGS/
+  // REPLAYING regardless of this cap — that was the actual bug, not just a too-small memory window.
+  const showyWordsPlayed = sourcePlayed.filter(play => play.owner === 2 && (COMPOUND_WORD_SET.has(play.word) || EXTENDED_WORD_SET.has(play.word) || !BOT_WORDS.includes(play.word))).length;
   // Turn number counting every play so far, both sides — a showy word as the rival's opening move or
   // two reads as showing off rather than playing naturally, so non-fierce difficulties hold off on
   // them until turn 5.
@@ -622,7 +624,13 @@ export function selectRivalMove(sourceOwners: Owner[], sourcePlayed: PlayedWord[
   const minLength = blanks <= 8 ? 2 : 3;
   const dynamicMax = Math.max(minLength, maxLength);
   const showyWordsAllowed = difficulty === "fierce" || (showyWordsPlayed < MAX_NON_FIERCE_COMPOUND_WORDS && turnNumber >= 5);
-  const availableCandidates = BOT_WORDS.filter(word => word.length >= minLength && word.length <= dynamicMax && !blocksPlayedWord(word, usedWords) && (showyWordsAllowed || !COMPOUND_WORD_SET.has(word)) && canForm(word, letters));
+  const availableCandidates = BOT_WORDS.filter(word => word.length >= minLength && word.length <= dynamicMax && !blocksPlayedWord(word, usedWords) && (showyWordsAllowed || !(COMPOUND_WORD_SET.has(word) || EXTENDED_WORD_SET.has(word))) && canForm(word, letters));
+  // If the player currently has the center bullseye locked, the rival sniping just one ring tile away
+  // from them doesn't gain much (that lone tile usually isn't even protected once it changes hands)
+  // but hands the player an easy one-tile relock next turn — which re-fires the bonus turn. Earning it
+  // once is the intended reward; letting the rival's own tile choices repeatedly re-open it for free
+  // isn't, so moves that would break an existing player lock on the center are filtered out below.
+  const centerWasPlayerLocked = CENTER_BONUS_ENABLED && protectedTiles(sourceOwners)[CENTER_TILE] && sourceOwners[CENTER_TILE] === 1;
 
   if (blanks > 0) {
     // decidedOutcome only returns non-null once every tile is claimed, so this only matches a word
@@ -731,31 +739,39 @@ export function selectRivalMove(sourceOwners: Owner[], sourcePlayed: PlayedWord[
     // equally-scored alternative.
     const centerNewlyLocked = CENTER_BONUS_ENABLED && protectedTiles(nextOwners)[CENTER_TILE] && !protectedNow[CENTER_TILE] && nextOwners[CENTER_TILE] === 2;
     const centerBonusIncentive = centerNewlyLocked ? 30 : 0;
+    const breaksPlayerCenterLock = centerWasPlayerLocked && !(protectedTiles(nextOwners)[CENTER_TILE] && nextOwners[CENTER_TILE] === 1);
     const score = difficulty === "fierce"
       ? strategicSwing * 1.65 + cornerSwing * 1.8 + captures * 9 + word.length * .8 + powerBonus - (partialEndgameGrab ? open * 14 : 0) - (recentRepeat ? 16 : 0) + centerBonusIncentive
       : difficulty === "clever"
         ? swing * .62 + captures * 4.1 + open * .65 + word.length * .72 + (EXTENDED_WORD_SET.has(word) ? 2.4 : 0) + (COMPOUND_WORD_SET.has(word) ? 1.2 : 0) - (partialEndgameGrab ? open * 9 : 0) - (recentRepeat ? 10 : 0) + centerBonusIncentive
         : word.length + captures * 1.5 + open * .5 + Math.random() * 4 - (partialEndgameGrab ? open * 6 : 0) - (recentRepeat ? 6 : 0) + centerBonusIncentive;
-    return { word, ids, nextOwners, score, captures, open };
+    return { word, ids, nextOwners, score, captures, open, breaksPlayerCenterLock };
   };
   const quickDifficulty = difficulty === "fierce" ? "clever" : difficulty;
   const quickRankedAll = candidates.map(word => scoreCandidate(word, chooseTiles(word, letters, sourceOwners, quickDifficulty)))
     .sort((a, b) => b.score - a.score);
+  // Same hard-filter-with-fallback pattern as the endgame restraint below: if any move exists that
+  // doesn't break the player's current center lock, only consider those; only fall back to a
+  // lock-breaking move if it's genuinely the rival's only legal option.
+  const centerLockSafeAll = quickRankedAll.filter(move => !move.breaksPlayerCenterLock);
+  const quickRankedCenterSafe = centerLockSafeAll.length > 0 ? centerLockSafeAll : quickRankedAll;
   // A score penalty alone (see partialEndgameGrab above) wasn't strict enough — the rival still took
   // one of the last few blanks when a high-scoring word happened to touch one. So once blanks are
   // scarce, this hard-filters down to only moves that touch zero neutral tiles, as long as at least
   // one such move actually exists — the rival keeps playing (stealing/rearranging claimed tiles)
   // without ever reaching into the dwindling blank pool until it truly has no other legal move.
-  const endgameSafeMoves = quickRankedAll.filter(move => move.open === 0);
+  const endgameSafeMoves = quickRankedCenterSafe.filter(move => move.open === 0);
   const quickRanked = blanks > 0 && blanks <= ENDGAME_BLANK_THRESHOLD && endgameSafeMoves.length > 0
     ? endgameSafeMoves
-    : quickRankedAll;
+    : quickRankedCenterSafe;
   // Fierce re-picks tiles with its own beam search below, which can land on a different tile for the
-  // same word than the quick pass did — including, in rare cases, a neutral one the filter above was
-  // meant to rule out. Re-check after the re-pick so the endgame guarantee actually holds for Fierce.
-  const rerankedFierce = difficulty === "fierce"
+  // same word than the quick pass did — including, in rare cases, a neutral one the filters above were
+  // meant to rule out. Re-check after the re-pick so both guarantees actually hold for Fierce.
+  const rerankedFierceAll = difficulty === "fierce"
     ? quickRanked.slice(0, 40).map(move => scoreCandidate(move.word, chooseTiles(move.word, letters, sourceOwners, "fierce"))).sort((a, b) => b.score - a.score)
     : quickRanked;
+  const centerLockSafeFierce = rerankedFierceAll.filter(move => !move.breaksPlayerCenterLock);
+  const rerankedFierce = centerLockSafeFierce.length > 0 ? centerLockSafeFierce : rerankedFierceAll;
   const fierceSafeMoves = rerankedFierce.filter(move => move.open === 0);
   const ranked = difficulty === "fierce" && blanks > 0 && blanks <= ENDGAME_BLANK_THRESHOLD && fierceSafeMoves.length > 0
     ? fierceSafeMoves
