@@ -305,6 +305,24 @@ function isLongerForm(longer: string, shorter: string) {
   return false;
 }
 
+// A short suffix inflection (STRONG -> STRONGEST, SMOKE -> SMOKER) is just the normal grammatical
+// form of a word the rival already knows — not a display of vocabulary the way a compound or a
+// much longer/different extension (DEAL -> DEALERSHIP) is. See selectRivalMove below: this is used
+// to exempt plain inflections from the showy-word pacing cap, on both sides of it, so the rival
+// isn't stuck defaulting to the bare root for most of the game just because its "showy word" budget
+// ran out.
+const MAX_INFLECTION_GROWTH = 3;
+function isNaturalInflection(word: string) {
+  return BOT_WORDS.some(root => {
+    if (root === word || word.length <= root.length || word.length - root.length > MAX_INFLECTION_GROWTH) return false;
+    // Mirrors the e-dropped-stem handling in the dictionary-extension search below (SMOKE -> SMOK- ->
+    // SMOKING/SMOKER) — without it, silent-e words never register as natural inflections of the root
+    // the rival already knows, since "smoking" doesn't literally start with "smoke".
+    const stems = root.endsWith("e") ? [root, root.slice(0, -1)] : [root];
+    return stems.some(stem => word.startsWith(stem)) || WORD_PREFIXES.some(prefix => word === `${prefix}${root}`);
+  });
+}
+
 // Binary-searches the (alphabetically sorted, see build-server.mjs) full dictionary for words that
 // are a prefix extension of `root` — i.e. real dictionary words the rival could play instead of the
 // bare root to claim more tiles and block the human from stealing that extension later. Used to plug
@@ -611,13 +629,17 @@ export function selectRivalMove(sourceOwners: Owner[], sourcePlayed: PlayedWord[
   // dominate the top of every ranking and get replayed constantly.
   const recentSet = new Set(recentWords ?? []);
   // "Showy" words — compounds (WORDPLAY-style), the prefix/suffix extended forms (BUILDINGS,
-  // REPLAYING...), and anything only found via the dictionary-extension search below (DEALERSHIP,
-  // FACTORSHIP, ARCHANGELS...) rather than the rival's own basic word list — are capped per game so
-  // the rival doesn't lean on them every single turn. EXTENDED_WORD_SET used to be treated as
-  // unrestricted "normal vocabulary," but it's exactly as showy as the compound list (and gets its
-  // own score bonus below), so leaving it ungated meant the rival kept opening games with BUILDINGS/
-  // REPLAYING regardless of this cap — that was the actual bug, not just a too-small memory window.
-  const showyWordsPlayed = sourcePlayed.filter(play => play.owner === 2 && (COMPOUND_WORD_SET.has(play.word) || EXTENDED_WORD_SET.has(play.word) || !BOT_WORDS.includes(play.word))).length;
+  // REPLAYING...), and anything only found via the dictionary-extension search below that's more
+  // than a plain inflection (DEALERSHIP, FACTORSHIP, ARCHANGELS...) rather than the rival's own basic
+  // word list — are capped per game so the rival doesn't lean on them every single turn. EXTENDED_WORD_SET
+  // used to be treated as unrestricted "normal vocabulary," but it's exactly as showy as the compound
+  // list (and gets its own score bonus below), so leaving it ungated meant the rival kept opening
+  // games with BUILDINGS/REPLAYING regardless of this cap — that was the actual bug, not just a too-
+  // small memory window. Plain inflections (STRONGEST, SMOKER — see isNaturalInflection) are excluded
+  // from this count on purpose: they're not vocabulary showing off, and counting them ate the whole
+  // budget on ordinary plays, which was the actual cause of the rival defaulting to bare roots
+  // (STRONG instead of STRONGEST) for most of every game.
+  const showyWordsPlayed = sourcePlayed.filter(play => play.owner === 2 && (COMPOUND_WORD_SET.has(play.word) || EXTENDED_WORD_SET.has(play.word) || (!BOT_WORDS.includes(play.word) && !isNaturalInflection(play.word)))).length;
   // Turn number counting every play so far, both sides — a showy word as the rival's opening move or
   // two reads as showing off rather than playing naturally, so non-fierce difficulties hold off on
   // them until turn 5.
@@ -688,10 +710,13 @@ export function selectRivalMove(sourceOwners: Owner[], sourcePlayed: PlayedWord[
   // too — SMOKE -> SMOK- -> SMOKER/SMOKING/SMOKED) so the rival can actually consider playing the
   // longer, more defensive word instead. Only for Clever/Fierce — Relaxed keeps its narrower vocabulary
   // on purpose. This search isn't picky about *how much* longer the match is (DEALERSHIP, FACTORSHIP,
-  // ARCHANGELS all turned up this way too), so every word it finds counts as a "showy" word toward
-  // the same per-game cap as compounds — otherwise every single turn ends up being an elaborate word,
-  // not just a couple.
-  const dictionaryExtendedCandidates = (difficulty === "clever" || difficulty === "fierce") && showyWordsAllowed && dictionaryWords?.length
+  // ARCHANGELS all turned up this way too), so a genuinely longer/different find still counts as a
+  // "showy" word toward the same per-game cap as compounds — otherwise every single turn ends up
+  // being an elaborate word, not just a couple. Plain inflections (STRONGEST off STRONG) are exempt
+  // from that cap (see isNaturalInflection) and always searched for, regardless of showyWordsAllowed
+  // — the rival should never settle for a bare root over its own genuine longer form just because the
+  // showy budget for the game happens to be spent, or because it's still turn 1-4.
+  const dictionaryExtendedCandidates = (difficulty === "clever" || difficulty === "fierce") && dictionaryWords?.length
     ? (() => {
         const availableCandidateSet = new Set(availableCandidates);
         const extended = new Set<string>();
@@ -701,7 +726,8 @@ export function selectRivalMove(sourceOwners: Owner[], sourcePlayed: PlayedWord[
             findDictionaryExtensions(base, dictionaryWords, dynamicMax).forEach(ext => extended.add(ext));
           });
         });
-        return [...extended].filter(ext => !availableCandidateSet.has(ext) && !blocksPlayedWord(ext, usedWords) && canForm(ext, letters));
+        const found = [...extended].filter(ext => !availableCandidateSet.has(ext) && !blocksPlayedWord(ext, usedWords) && canForm(ext, letters));
+        return showyWordsAllowed ? found : found.filter(isNaturalInflection);
       })()
     : [];
   const candidatesBeforeVariety = difficulty === "clever" || difficulty === "fierce"
