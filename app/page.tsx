@@ -68,21 +68,24 @@ const BOT_WORDS = [...new Set([...WORDS, ...STRATEGY_WORDS])];
 // predictable, but that list is too thin to reliably spot game-ending finishing words late in a
 // match. We lazily fetch the same full dictionary the server validates human words against and
 // cache it in memory, so the endgame finisher search (see selectRivalMove below) can draw on it
-// once it's loaded without paying the cost on every single move.
-let fullDictionaryCache: string[] | null = null;
-let fullDictionaryPromise: Promise<string[]> | null = null;
-function loadFullDictionary(): Promise<string[]> {
-  if (fullDictionaryCache) return Promise.resolve(fullDictionaryCache);
-  if (!fullDictionaryPromise) {
-    fullDictionaryPromise = fetch("/api/data/words.json")
+// once it's loaded without paying the cost on every single move. This is deliberately the smaller
+// rival-words.json (plain modern English via Wiktionary) rather than the full ENABLE1-merged
+// words.json used to validate player-typed words — the full list is a competitive-Scrabble word
+// list padded with obscure technical entries, which made the rival's own move choices unreadable.
+let rivalDictionaryCache: string[] | null = null;
+let rivalDictionaryPromise: Promise<string[]> | null = null;
+function loadRivalDictionary(): Promise<string[]> {
+  if (rivalDictionaryCache) return Promise.resolve(rivalDictionaryCache);
+  if (!rivalDictionaryPromise) {
+    rivalDictionaryPromise = fetch("/api/data/rival-words.json")
       .then(response => response.ok ? response.json() : [])
       .then((words: unknown) => {
-        fullDictionaryCache = Array.isArray(words) ? words : [];
-        return fullDictionaryCache;
+        rivalDictionaryCache = Array.isArray(words) ? words : [];
+        return rivalDictionaryCache;
       })
       .catch(() => []);
   }
-  return fullDictionaryPromise;
+  return rivalDictionaryPromise;
 }
 
 const POWER_WORD_SET = new Set(STRATEGY_WORDS);
@@ -638,11 +641,11 @@ export function selectRivalMove(sourceOwners: Owner[], sourcePlayed: PlayedWord[
     // ending finisher, not just a strong move.
     // The rival's regular vocabulary (BOT_WORDS) is deliberately small, which meant it could walk
     // right past a real finishing word just because that word wasn't in its curated list. Once the
-    // board is down to a handful of blanks, also check the full dictionary (loaded once and cached
-    // — see loadFullDictionary above) so it works as hard as a human would to close the game out.
-    // Relaxed and Clever stay on the small curated list here on purpose. Relaxed is meant to be the
-    // easy/beginner difficulty, and Clever is meant to be the middle difficulty — letting either
-    // reach into a 200k+ word dictionary for a closing move (e.g. an obscure finisher like EVONYMUS)
+    // board is down to a handful of blanks, also check the rival's wider dictionary (loaded once and
+    // cached — see loadRivalDictionary above) so it works as hard as a human would to close the game
+    // out. Relaxed and Clever stay on the small curated list here on purpose. Relaxed is meant to be
+    // the easy/beginner difficulty, and Clever is meant to be the middle difficulty — letting either
+    // reach into a much larger dictionary for a closing move (e.g. an obscure finisher like EVONYMUS)
     // defeats the point of both. Only Fierce, the "throw everything at it" difficulty, gets the
     // widened dictionary fallback. Even there it's capped at 8 letters — long enough to catch real
     // finishing words, short enough to stay away from things like BIVOUACKED or REMANUFACTURING.
@@ -1174,10 +1177,10 @@ export default function Home() {
     if (window.localStorage.getItem("gridlock-tutorial-v2") !== "seen") setTutorialOpen(true);
   }, []);
 
-  // Warm the full-dictionary cache as soon as the app loads so it's ready well before the rival
+  // Warm the rival-dictionary cache as soon as the app loads so it's ready well before the rival
   // needs it — both for an endgame finishing move and, from turn one, for finding real dictionary
-  // extensions of its own curated words (see loadFullDictionary / selectRivalMove).
-  useEffect(() => { void loadFullDictionary(); }, []);
+  // extensions of its own curated words (see loadRivalDictionary / selectRivalMove).
+  useEffect(() => { void loadRivalDictionary(); }, []);
 
   useEffect(() => {
     let cancelled = false;
@@ -1297,7 +1300,7 @@ export default function Home() {
     // fair comparison, so the recent-words variety penalty (which depends on this device's local
     // history) only applies to regular classic games, not daily ones.
     const recentWords = mode === "daily" ? undefined : loadRecentRivalWords(difficulty);
-    const move = selectRivalMove(sourceOwners, sourcePlayed, letters, difficulty, mode === "daily", fullDictionaryCache ?? undefined, recentWords);
+    const move = selectRivalMove(sourceOwners, sourcePlayed, letters, difficulty, mode === "daily", rivalDictionaryCache ?? undefined, recentWords);
     if (!move) { setTurn("you"); setMessage("Your turn"); return; }
     if (mode !== "daily") recordRivalWord(difficulty, move.word);
     const nextOwners = move.nextOwners;

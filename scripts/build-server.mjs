@@ -33,9 +33,31 @@ const supplementalWords = [
   "wordless", "wordlessly", "wordlessness",
   "longshot", "longshots",
 ];
-const words = [...new Set([...JSON.parse(encoded), ...wiktionaryWords, ...enable1Words, ...clientEncoded.trim().split(/\s+/), ...strategyEncoded.trim().split(/\s+/), ...supplementalWords])].sort();
+// A short blocklist of entries that are technically valid Scrabble-style tokens but are
+// ethnonym/religious-identity terms inappropriate to have surface as game words (whether typed by
+// a player or, worse, proactively chosen and played by the rival AI). Filtered out of every output
+// dictionary below, regardless of which source list they came from.
+const blocklist = new Set(["jew", "jews", "jewed", "jewing"]);
+
+const words = [...new Set([...JSON.parse(encoded), ...wiktionaryWords, ...enable1Words, ...clientEncoded.trim().split(/\s+/), ...strategyEncoded.trim().split(/\s+/), ...supplementalWords])]
+  .filter(word => !blocklist.has(word.toLowerCase()))
+  .sort();
 if (!Array.isArray(words) || words.length < 200000) throw new Error("ENCIRCLE dictionary is unexpectedly small.");
+
+// The rival AI's own move-generation search (see selectRivalMove / loadRivalDictionary in
+// app/page.tsx) used to draw candidates straight from the full `words` list above once it grew to
+// include ENABLE1 — which is a Scrabble-competition word list, not a "words a person would
+// recognize" list, so the rival started opening nearly every turn with things like TIMBRELER or
+// ORACULARITIES. app/word-list.ts (the base dictionary) has its own share of archaic obscurities
+// too (aani, aaru, ...). wiktionary-words.json is comparatively plain modern English, so it's used
+// here as the rival's own vocabulary pool instead — still far bigger than the old hardcoded
+// BOT_WORDS list, but without the competitive-Scrabble jargon flood. Player-typed words are
+// unaffected: they're still checked against the full `words.json` above.
+const rivalWords = [...new Set([...wiktionaryWords, ...clientEncoded.trim().split(/\s+/), ...strategyEncoded.trim().split(/\s+/), ...supplementalWords])]
+  .filter(word => !blocklist.has(word.toLowerCase()))
+  .sort();
 
 await mkdir(path.join(output, "data"), { recursive: true });
 await cp(path.join(root, "server", "api"), output, { recursive: true });
 await writeFile(path.join(output, "data", "words.json"), JSON.stringify(words));
+await writeFile(path.join(output, "data", "rival-words.json"), JSON.stringify(rivalWords));
