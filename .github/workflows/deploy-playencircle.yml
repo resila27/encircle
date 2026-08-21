@@ -68,7 +68,16 @@ jobs:
           DH_USER: ${{ secrets.DREAMHOST_USER }}
           DH_HOST: ${{ secrets.DREAMHOST_HOST }}
         run: |
-          set -euo pipefail
+          set -uo pipefail
+          # Deliberately not "set -e" for this step — see the loop below. We don't know for certain
+          # which of these candidate paths is the real document root for this DreamHost account, so
+          # this writes to all of them defensively. With "set -e" (the previous behavior), the FIRST
+          # candidate that doesn't exist on this account (e.g. no public_html/ folder at all) aborted
+          # the whole script immediately via a hard exit — even after every real target had already
+          # deployed successfully. That's exactly why every run here has shown red X since Aug 10: the
+          # site was in fact updating correctly the whole time, this step just reported failure once it
+          # hit a candidate path that doesn't apply to this account. The job now only fails for real if
+          # every single candidate fails.
 
           targets="domains/playencircle.com domains/playencircle.com/public domains/playencircle.com/public_html \
           playencircle.com playencircle.com/public playencircle.com/public_html public_html/playencircle.com public_html/playencircle.com/public"
@@ -103,9 +112,21 @@ jobs:
 
           echo "Deploying to: $REMOTE"
 
+          success_count=0
           for target in $targets; do
             echo "Copying files to: $target"
-            rsync -avz --delete --exclude='.DS_Store' -e "ssh $SSH_OPTS" public/ "$REMOTE:$target/"
-            rsync -avz --delete -e "ssh $SSH_OPTS" /tmp/encircle-deploy/cache-headers.htaccess "$REMOTE:$target/.htaccess"
-            ssh $SSH_OPTS "$REMOTE" "printf '%s\n' \"$target\" > \"$target/encircle-deploy-root.txt\""
+            if rsync -avz --delete --exclude='.DS_Store' -e "ssh $SSH_OPTS" public/ "$REMOTE:$target/" \
+              && rsync -avz --delete -e "ssh $SSH_OPTS" /tmp/encircle-deploy/cache-headers.htaccess "$REMOTE:$target/.htaccess" \
+              && ssh $SSH_OPTS "$REMOTE" "printf '%s\n' \"$target\" > \"$target/encircle-deploy-root.txt\""; then
+              echo "Deployed OK to $target"
+              success_count=$((success_count + 1))
+            else
+              echo "Skipping $target — not a valid path on this account, that's expected for most of these guesses"
+            fi
           done
+
+          echo "Deployed successfully to $success_count candidate path(s)."
+          if [ "$success_count" -eq 0 ]; then
+            echo "Every candidate deploy path failed — nothing was actually deployed."
+            exit 1
+          fi
