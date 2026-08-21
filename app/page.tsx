@@ -1513,7 +1513,6 @@ export default function Home() {
           <BoardPreview letters={HOME_PREVIEW_LETTERS} own={HOME_PREVIEW_OWN} rival={HOME_PREVIEW_RIVAL} />
         </div>
         <p className="eyebrow">A battle of words</p>
-        <p className="beta-label">Circular board beta</p>
         <h1>ENCIRCLE</h1>
         <p className="lede">Find words. Claim tiles.<br/>Surround letters to make them yours for good.</p>
       </section>
@@ -1592,7 +1591,7 @@ export default function Home() {
     <><main className="game-shell">
       <header className="game-topbar">
         <button className="icon-button" onClick={() => setScreen("home")} aria-label="Back to menu">←</button>
-        <div className="wordmark">{mode === "daily" ? "ENCIRCLE DAILY · BETA" : "ENCIRCLE · BETA"}</div>
+        <div className="wordmark">{mode === "daily" ? "ENCIRCLE DAILY" : "ENCIRCLE"}</div>
         <div className="topbar-actions">
           <button className="account-chip" onClick={() => setAccountOpen(true)} type="button">{account ? "Stats" : "Save"}</button>
           <button className="icon-button restart" onClick={() => newGame()} aria-label="New game">↻</button>

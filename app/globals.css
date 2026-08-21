@@ -18,7 +18,6 @@ button:focus-visible { outline:3px solid #151c19; outline-offset:3px; }
 .board-preview-svg .tile.ring-0 .tile-letter { font-size:4.6px; }
 .board-preview-svg .tile.ring-0.preview-own .tile-letter { fill:#fff; }
 .eyebrow { margin:0 0 7px; text-transform:uppercase; letter-spacing:.18em; font-size:12px; font-weight:800; color:#657069; }
-.beta-label { width:max-content; margin:0 auto 9px; padding:5px 9px 4px; border:1px solid var(--coral-dark); border-radius:999px; background:#fff2d3; color:#9b6106; font-size:9px; font-weight:900; letter-spacing:.13em; text-transform:uppercase; }
 h1 { margin:0; font-family:Georgia,serif; font-size:clamp(55px,16vw,78px); line-height:.95; letter-spacing:-.06em; }
 .lede { color:#55605a; font-family:Georgia,serif; font-size:19px; line-height:1.45; margin:18px 0 0; }
 .daily-card { width:100%; position:relative; margin:30px 0 0; padding:18px 52px 18px 19px; border:0; border-radius:18px; background:var(--ink); color:white; text-align:left; cursor:pointer; box-shadow:0 5px 0 #000; transition:.15s; }
