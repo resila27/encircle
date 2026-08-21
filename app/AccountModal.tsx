@@ -13,14 +13,28 @@ type Props = {
   onClose: () => void;
   onLogin: (result: { game: SavedGame | null; stats: AccountStats; user: AccountUser }) => void;
   onLogout: () => Promise<void>;
+  onSetMarketingOptIn: (optIn: boolean) => Promise<void>;
 };
 
-export function AccountModal({ account, stats, onClose, onLogin, onLogout }: Props) {
+export function AccountModal({ account, stats, onClose, onLogin, onLogout, onSetMarketingOptIn }: Props) {
   const [email, setEmail] = useState("");
   const [code, setCode] = useState("");
   const [codeSent, setCodeSent] = useState(false);
   const [busy, setBusy] = useState(false);
   const [error, setError] = useState("");
+  const [optInBusy, setOptInBusy] = useState(false);
+
+  const toggleOptIn = async (checked: boolean) => {
+    setOptInBusy(true);
+    setError("");
+    try {
+      await onSetMarketingOptIn(checked);
+    } catch (caught) {
+      setError(caught instanceof Error ? caught.message : "Something went wrong");
+    } finally {
+      setOptInBusy(false);
+    }
+  };
 
   const submit = async (event: FormEvent) => {
     event.preventDefault();
@@ -76,6 +90,15 @@ export function AccountModal({ account, stats, onClose, onLogin, onLogout }: Pro
                 return <div key={level}><span>{level}</span><strong>{record.wins}–{record.completed - record.wins}</strong></div>;
               })}
             </div>
+            <label className="account-marketing-opt-in">
+              <input
+                checked={account.marketingOptIn}
+                disabled={optInBusy}
+                onChange={event => toggleOptIn(event.target.checked)}
+                type="checkbox"
+              />
+              Email me about new features and updates
+            </label>
             {error && <p className="account-error" role="alert">{error}</p>}
             <button className="primary" disabled={busy} onClick={onClose} type="button">Keep playing</button>
             <button className="account-guest" disabled={busy} onClick={signOut} type="button">Log out</button>

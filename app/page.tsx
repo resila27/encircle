@@ -7,6 +7,7 @@ import {
   getAccountStatus,
   logout,
   saveGame,
+  setMarketingOptIn,
   EMPTY_STATS,
   type AccountStats,
   type AccountUser,
@@ -1433,6 +1434,11 @@ export default function Home() {
     setAccountOpen(false);
   };
 
+  const updateMarketingOptIn = async (optIn: boolean) => {
+    const result = await setMarketingOptIn(optIn);
+    setAccount(result.user);
+  };
+
   const lookUpWord = async (word: string) => {
     setDefinition({ word, text: "", loading: true });
     try {
@@ -1481,6 +1487,7 @@ export default function Home() {
       onClose={() => setAccountOpen(false)}
       onLogin={completeLogin}
       onLogout={signOut}
+      onSetMarketingOptIn={updateMarketingOptIn}
     />
   ) : null;
 

@@ -17,7 +17,7 @@ export type SavedGame = {
   dailyDate?: string | null;
 };
 
-export type AccountUser = { email: string };
+export type AccountUser = { email: string; marketingOptIn: boolean };
 export type AccountStats = {
   completed: number;
   wins: number;
@@ -82,4 +82,8 @@ export function saveGame(game: SavedGame) {
 
 export function logout() {
   return request<{ ok: true }>("logout", { body: "{}", method: "POST" });
+}
+
+export function setMarketingOptIn(optIn: boolean) {
+  return request<{ user: AccountUser }>("set-marketing-opt-in", { body: JSON.stringify({ optIn }), method: "POST" });
 }

@@ -3,7 +3,9 @@ PRAGMA foreign_keys = ON;
 CREATE TABLE IF NOT EXISTS users (
   id INTEGER PRIMARY KEY AUTOINCREMENT,
   email TEXT NOT NULL UNIQUE,
-  created_at TEXT NOT NULL
+  created_at TEXT NOT NULL,
+  marketing_opt_in INTEGER NOT NULL DEFAULT 0,
+  marketing_opt_in_at TEXT
 );
 
 CREATE TABLE IF NOT EXISTS login_codes (

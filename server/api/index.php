@@ -68,6 +68,21 @@ function app_send_code_email(string $recipient, string $code): bool {
     return true;
 }
 
+function ensure_marketing_columns(PDO $pdo): void {
+    // schema-sqlite.sql's CREATE TABLE IF NOT EXISTS only runs against a fresh database — it does
+    // nothing to the live table on a server that's already been running. This adds the two marketing
+    // opt-in columns on demand if they're missing, so a plain code deploy is enough; nobody has to
+    // SSH in and run an ALTER TABLE by hand. Cheap to check (one PRAGMA) and safe to run every boot.
+    $columns = $pdo->query('PRAGMA table_info(users)')->fetchAll();
+    $hasOptIn = false;
+    foreach ($columns as $column) {
+        if (($column['name'] ?? '') === 'marketing_opt_in') $hasOptIn = true;
+    }
+    if ($hasOptIn) return;
+    $pdo->exec('ALTER TABLE users ADD COLUMN marketing_opt_in INTEGER NOT NULL DEFAULT 0');
+    $pdo->exec('ALTER TABLE users ADD COLUMN marketing_opt_in_at TEXT');
+}
+
 function db(): PDO {
     static $pdo;
     if ($pdo instanceof PDO) return $pdo;
@@ -79,6 +94,7 @@ function db(): PDO {
     ]);
     $pdo->exec('PRAGMA foreign_keys = ON');
     $pdo->exec('PRAGMA busy_timeout = 5000');
+    ensure_marketing_columns($pdo);
     return $pdo;
 }
 
@@ -86,12 +102,16 @@ function current_user(): ?array {
     $token = $_COOKIE['gridlock_session'] ?? '';
     if (!is_string($token) || strlen($token) < 32) return null;
     $statement = db()->prepare(
-        'SELECT users.id, users.email FROM sessions JOIN users ON users.id = sessions.user_id '
+        'SELECT users.id, users.email, users.marketing_opt_in FROM sessions JOIN users ON users.id = sessions.user_id '
         . 'WHERE sessions.token_hash = ? AND sessions.expires_at > ? LIMIT 1'
     );
     $statement->execute([hash('sha256', $token), gmdate('Y-m-d H:i:s')]);
     $user = $statement->fetch();
     return $user ?: null;
+}
+
+function user_payload(array $user): array {
+    return ['email' => $user['email'], 'marketingOptIn' => (bool) ((int) ($user['marketing_opt_in'] ?? 0))];
 }
 
 function require_user(): array {
@@ -314,8 +334,25 @@ try {
         respond([
             'game' => $user ? latest_game((int) $user['id']) : null,
             'stats' => $user ? stats_for_user((int) $user['id']) : empty_stats(),
-            'user' => $user ? ['email' => $user['email']] : null,
+            'user' => $user ? user_payload($user) : null,
         ]);
+    }
+
+    // Read-only export of opted-in emails for David to pull into whatever he ends up sending from —
+    // deliberately separate from every other action here, which all serve the game itself. Protected
+    // by a shared secret (set admin_token in gridlock-config.php) rather than a session, since this
+    // isn't tied to any particular logged-in player. hash_equals guards against timing attacks on the
+    // comparison. Visit /api/index.php?action=export-marketing-emails&token=... in a browser to use it
+    // — it stays above the POST-only gate below on purpose, so it works as a plain link.
+    if ($action === 'export-marketing-emails') {
+        $config = app_config();
+        $expected = (string) ($config['admin_token'] ?? '');
+        $provided = (string) ($_GET['token'] ?? '');
+        if ($expected === '' || !hash_equals($expected, $provided)) respond(['error' => 'Not found.'], 404);
+        $rows = db()->query(
+            'SELECT email, marketing_opt_in_at FROM users WHERE marketing_opt_in = 1 ORDER BY marketing_opt_in_at'
+        )->fetchAll();
+        respond(['emails' => array_map(static fn ($row) => ['email' => $row['email'], 'optedInAt' => $row['marketing_opt_in_at']], $rows)]);
     }
 
     if ($_SERVER['REQUEST_METHOD'] !== 'POST') respond(['error' => 'Method not allowed.'], 405);
@@ -418,7 +455,7 @@ try {
         }
         db()->beginTransaction();
         db()->prepare('UPDATE login_codes SET used_at = ? WHERE id = ?')->execute([gmdate('Y-m-d H:i:s'), $record['id']]);
-        $userStatement = db()->prepare('SELECT id, email FROM users WHERE email = ?');
+        $userStatement = db()->prepare('SELECT id, email, marketing_opt_in FROM users WHERE email = ?');
         $userStatement->execute([$email]);
         $user = $userStatement->fetch();
         if (!$user) {
@@ -436,7 +473,7 @@ try {
         respond([
             'game' => latest_game((int) $user['id']),
             'stats' => stats_for_user((int) $user['id']),
-            'user' => ['email' => $user['email']],
+            'user' => user_payload($user),
         ]);
     }
 
@@ -445,6 +482,14 @@ try {
         if (is_string($token) && $token !== '') db()->prepare('DELETE FROM sessions WHERE token_hash = ?')->execute([hash('sha256', $token)]);
         setcookie('gridlock_session', '', ['expires' => 1, 'httponly' => true, 'path' => '/', 'samesite' => 'Lax', 'secure' => true]);
         respond(['ok' => true]);
+    }
+
+    if ($action === 'set-marketing-opt-in') {
+        $user = require_user();
+        $optIn = (bool) (body()['optIn'] ?? false);
+        $statement = db()->prepare('UPDATE users SET marketing_opt_in = ?, marketing_opt_in_at = ? WHERE id = ?');
+        $statement->execute([$optIn ? 1 : 0, $optIn ? gmdate('Y-m-d H:i:s') : null, $user['id']]);
+        respond(['user' => user_payload(['email' => $user['email'], 'marketing_opt_in' => $optIn ? 1 : 0])]);
     }
 
     if ($action === 'save-game') {
