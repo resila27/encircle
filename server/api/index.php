@@ -525,17 +525,13 @@ try {
 } catch (Throwable $error) {
     error_log('ENCIRCLE API: ' . $error->getMessage());
     $payload = ['error' => 'The server could not complete that request.'];
-    // Temporary diagnostic: only reveals the real exception message to whoever holds admin_token
-    // (same shared-secret pattern as export-marketing-emails), so this is safe to leave gated like
-    // this even in production. Lets us see the actual PHP error without shell/log access.
-    try {
-        $adminToken = (string) (app_config()['admin_token'] ?? '');
-        $provided = (string) ($_GET['debug_token'] ?? '');
-        if ($adminToken !== '' && hash_equals($adminToken, $provided)) {
-            $payload['debug'] = $error->getMessage() . ' in ' . $error->getFile() . ':' . $error->getLine();
-        }
-    } catch (Throwable $ignored) {
-        // config itself unavailable; nothing more we can safely reveal
+    // Temporary diagnostic: only reveals the real exception message to whoever supplies this exact
+    // hardcoded token, deliberately NOT read from config, since the bug we're chasing might be
+    // config-loading itself failing (which would otherwise make this diagnostic silently swallow
+    // itself the same way the real bug does). Remove this whole block once the underlying bug is fixed.
+    $provided = (string) ($_GET['debug_token'] ?? '');
+    if (hash_equals('encircle-debug-3f8a9c2e1b7d4f60', $provided)) {
+        $payload['debug'] = $error->getMessage() . ' in ' . $error->getFile() . ':' . $error->getLine();
     }
     respond($payload, 500);
 }

@@ -79,8 +79,15 @@ jobs:
           # hit a candidate path that doesn't apply to this account. The job now only fails for real if
           # every single candidate fails.
 
-          targets="domains/playencircle.com domains/playencircle.com/public domains/playencircle.com/public_html \
-          playencircle.com playencircle.com/public playencircle.com/public_html public_html/playencircle.com public_html/playencircle.com/public"
+          # We now know for certain (confirmed via the encircle-deploy-root.txt marker actually being
+          # served live at https://playencircle.com/encircle-deploy-root.txt) that the real docroot on
+          # this account is the bare "playencircle.com" folder. Deliberately NOT shotgunning multiple
+          # candidate paths anymore: several of the old guesses (bare "domains/playencircle.com" and
+          # "playencircle.com" style parents) sync with --delete, and if guessed wrong they'd silently
+          # wipe out anything sitting in that folder that isn't part of this build (including
+          # gridlock-config.php, which lives outside the deployed folder). One confirmed-correct target
+          # is both simpler and much safer than guessing across eight.
+          targets="playencircle.com"
 
           SSH_OPTS="-o IdentitiesOnly=yes -o BatchMode=yes -o StrictHostKeyChecking=no -o UserKnownHostsFile=$HOME/.ssh/known_hosts -o ConnectTimeout=30 -i $HOME/.ssh/deploy_key"
 
