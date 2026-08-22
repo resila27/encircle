@@ -53,10 +53,40 @@ function app_mail_from_address(string $fromHeader): string {
     return '';
 }
 
+function app_send_via_resend(string $apiKey, string $from, string $recipient, string $subject, string $message): bool {
+    $payload = json_encode(['from' => $from, 'to' => [$recipient], 'subject' => $subject, 'text' => $message]);
+    $ch = curl_init('https://api.resend.com/emails');
+    curl_setopt_array($ch, [
+        CURLOPT_RETURNTRANSFER => true,
+        CURLOPT_POST => true,
+        CURLOPT_POSTFIELDS => $payload,
+        CURLOPT_HTTPHEADER => ["Authorization: Bearer {$apiKey}", 'Content-Type: application/json'],
+        CURLOPT_TIMEOUT => 10,
+    ]);
+    $responseBody = curl_exec($ch);
+    $status = curl_getinfo($ch, CURLINFO_HTTP_CODE);
+    $curlError = curl_error($ch);
+    curl_close($ch);
+    if ($status >= 200 && $status < 300) return true;
+    error_log("ENCIRCLE API: Resend send failed (status {$status}): " . ($curlError ?: (string) $responseBody));
+    return false;
+}
+
 function app_send_code_email(string $recipient, string $code): bool {
     $subject = 'Your ENCIRCLE login code';
     $message = "Your ENCIRCLE code is {$code}.\n\nIt expires in 10 minutes. If you did not request it, you can ignore this email.";
     $from = app_mail_from();
+
+    // Prefer Resend (a dedicated transactional email API) when configured — DreamHost's shared-hosting
+    // mail() has proven unreliable for PHP-originated mail specifically: it reports success but the
+    // message never actually leaves their outbound queue. Resend sends through its own infrastructure
+    // instead, sidestepping that entirely. Falls back to mail() only if no Resend key is configured.
+    $resendKey = (string) (app_config()['resend_api_key'] ?? '');
+    if ($resendKey !== '') {
+        if (app_send_via_resend($resendKey, $from, $recipient, $subject, $message)) return true;
+        error_log("ENCIRCLE API: Resend send failed for {$recipient}, falling back to mail()");
+    }
+
     $fromAddress = app_mail_from_address($from);
     $headers = "From: {$from}\r\nContent-Type: text/plain; charset=UTF-8";
     if ($fromAddress === '') return mail($recipient, $subject, $message, $headers);
@@ -524,14 +554,5 @@ try {
     respond(['error' => 'Not found.'], 404);
 } catch (Throwable $error) {
     error_log('ENCIRCLE API: ' . $error->getMessage());
-    $payload = ['error' => 'The server could not complete that request.'];
-    // Temporary diagnostic: only reveals the real exception message to whoever supplies this exact
-    // hardcoded token, deliberately NOT read from config, since the bug we're chasing might be
-    // config-loading itself failing (which would otherwise make this diagnostic silently swallow
-    // itself the same way the real bug does). Remove this whole block once the underlying bug is fixed.
-    $provided = (string) ($_GET['debug_token'] ?? '');
-    if (hash_equals('encircle-debug-3f8a9c2e1b7d4f60', $provided)) {
-        $payload['debug'] = $error->getMessage() . ' in ' . $error->getFile() . ':' . $error->getLine();
-    }
-    respond($payload, 500);
+    respond(['error' => 'The server could not complete that request.'], 500);
 }
