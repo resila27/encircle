@@ -524,5 +524,18 @@ try {
     respond(['error' => 'Not found.'], 404);
 } catch (Throwable $error) {
     error_log('ENCIRCLE API: ' . $error->getMessage());
-    respond(['error' => 'The server could not complete that request.'], 500);
+    $payload = ['error' => 'The server could not complete that request.'];
+    // Temporary diagnostic: only reveals the real exception message to whoever holds admin_token
+    // (same shared-secret pattern as export-marketing-emails), so this is safe to leave gated like
+    // this even in production. Lets us see the actual PHP error without shell/log access.
+    try {
+        $adminToken = (string) (app_config()['admin_token'] ?? '');
+        $provided = (string) ($_GET['debug_token'] ?? '');
+        if ($adminToken !== '' && hash_equals($adminToken, $provided)) {
+            $payload['debug'] = $error->getMessage() . ' in ' . $error->getFile() . ':' . $error->getLine();
+        }
+    } catch (Throwable $ignored) {
+        // config itself unavailable; nothing more we can safely reveal
+    }
+    respond($payload, 500);
 }
