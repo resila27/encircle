@@ -899,7 +899,7 @@ function recordRivalWord(difficulty: Difficulty, word: string) {
 const TUTORIAL_SLIDES = [
   {
     kind: "goal", eyebrow: "The objective", title: "Claim more tiles than your rival.",
-    body: "The game ends the instant all 31 tiles are claimed, when there's no empty space left to play. Whoever owns the most tiles at that point, wins. It isn't about matching colors or covering the board in one color, just who holds more tiles when it runs out of room.",
+    body: "The game ends the instant all 31 tiles are claimed, when there's no empty space left to play. Whoever owns the most tiles at that point, wins. It isn't about matching colors or covering the board in one color, just who holds more tiles after every tile has been played at least once.",
   },
   {
     kind: "claim", eyebrow: "The basic move", title: "Make words. Take ground.",
