@@ -1023,13 +1023,18 @@ function TutorialScore({ after, before }: { after: [number, number]; before: [nu
   );
 }
 
+// A believable finished-board split for the "objective" tutorial slide: a jagged, organically-grown
+// 16-15 territory boundary (like a real close game) rather than a perfect ring or wedge, so it doesn't
+// look like there's a shape/pattern to aim for.
+const GOAL_DEMO_OWN = new Set([0, 1, 2, 3, 7, 8, 10, 11, 14, 17, 18, 19, 21, 22, 23, 27]);
+
 function TutorialDemo({ kind }: { kind: typeof TUTORIAL_SLIDES[number]["kind"] }) {
   if (kind === "goal") return (
     <div className="goal-demo" aria-hidden="true">
       <div className="tutorial-board">
         <svg className="tutorial-board-svg" viewBox="0 0 100 100">
           {BOARD_LAYOUT.map((layout, i) => (
-            <g className={i <= 15 ? "demo-own" : "demo-rival"} key={i}>
+            <g className={GOAL_DEMO_OWN.has(i) ? "demo-own" : "demo-rival"} key={i}>
               {layout.ring === 0
                 ? <circle className="tile-shape" cx={50} cy={50} r={layout.rOut} />
                 : <path className="tile-shape" d={sectorPath(layout.rIn, layout.rOut, layout.a0, layout.a1)} />}
