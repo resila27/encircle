@@ -1571,6 +1571,7 @@ export default function Home() {
       <button className="text-button" onClick={() => { setTutorialPage(0); setTutorialOpen(true); }}>How to play & strategy</button>
       <button className="text-button haptics-toggle" aria-pressed={hapticsEnabled} onClick={toggleHaptics}>Vibration {hapticsEnabled ? "on" : "off"}</button>
       <a className="text-button haptics-toggle" href="mailto:hi@playencircle.com">Feedback? hi@playencircle.com</a>
+      <p className="copyright">Copyright © 2026 Re Si La Games</p>
     </main>{tutorialModal}{accountModal}</>
   );
 
