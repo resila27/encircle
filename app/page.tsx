@@ -898,6 +898,10 @@ function recordRivalWord(difficulty: Difficulty, word: string) {
 
 const TUTORIAL_SLIDES = [
   {
+    kind: "goal", eyebrow: "The objective", title: "Claim more tiles than your rival.",
+    body: "The game ends the instant all 31 tiles are claimed — there's no empty space left to play. Whoever owns the most tiles at that point wins. It isn't about matching colors or covering the board in one color, just who holds more tiles when it runs out of room.",
+  },
+  {
     kind: "claim", eyebrow: "The basic move", title: "Make words. Take ground.",
     body: "Choose tiles anywhere on the 31-tile board, then submit your word. Every tile you use becomes yours, so useful words are also territory moves. Surround the center bullseye tile with your own letters and you get an immediate bonus turn.",
   },
@@ -1020,6 +1024,23 @@ function TutorialScore({ after, before }: { after: [number, number]; before: [nu
 }
 
 function TutorialDemo({ kind }: { kind: typeof TUTORIAL_SLIDES[number]["kind"] }) {
+  if (kind === "goal") return (
+    <div className="goal-demo" aria-hidden="true">
+      <div className="tutorial-board">
+        <svg className="tutorial-board-svg" viewBox="0 0 100 100">
+          {BOARD_LAYOUT.map((layout, i) => (
+            <g className={i <= 15 ? "demo-own" : "demo-rival"} key={i}>
+              {layout.ring === 0
+                ? <circle className="tile-shape" cx={50} cy={50} r={layout.rOut} />
+                : <path className="tile-shape" d={sectorPath(layout.rIn, layout.rOut, layout.a0, layout.a1)} />}
+            </g>
+          ))}
+        </svg>
+      </div>
+      <div className="goal-demo-tally"><span>16 tiles</span><i>—</i><span>15 tiles</span></div>
+      <p className="goal-demo-caption">Board full · game over</p>
+    </div>
+  );
   if (kind === "words") return (
     <div className="word-power-demo" aria-hidden="true">
       <TutorialScore before={[4, 7]} after={[9, 5]} />
@@ -1292,6 +1313,25 @@ export default function Home() {
   };
 
   const newGame = (level = difficulty) => beginGame(level, "classic", null);
+
+  // The little circular arrow in the game topbar looked like a "new game" button, but players
+  // expect it to put all the tiles back on the same board so they can replay it — not deal out an
+  // entirely different set of letters. Keep the letters/difficulty/mode as-is; only clear the play
+  // state. Assign a fresh gameId so a completed replay saves as its own result instead of colliding
+  // with (and being ignored in favor of) a previous completed save under the old gameId.
+  const resetBoard = () => {
+    setGameId(newGameId());
+    setOwners(Array(BOARD_SIZE).fill(0));
+    setSelected([]);
+    setPlayed([]);
+    setTurn("you");
+    setMessage("Make any word");
+    setWordError("");
+    setDailyStanding(null);
+    setResultsOpen(false);
+    setShareStatus("");
+    setDefinition(null);
+  };
   // The daily challenge can only be played once per day: if it's already been finished, jump
   // straight to the results instead of letting the board reset for another attempt.
   const startDaily = (date = todayKey()) => {
@@ -1576,13 +1616,14 @@ export default function Home() {
   if (screen === "rules") return (
     <><main className="rules-shell">
       <button className="back" onClick={() => setScreen("home")} aria-label="Back">←</button>
-      <p className="eyebrow">Four simple rules</p>
+      <p className="eyebrow">Five simple rules</p>
       <h2>Claim the tiles</h2>
       <div className="rules-list">
         <article><span>1</span><div><h3>Make a word</h3><p>Tap letters in any order. Every letter you use becomes yours.</p></div></article>
         <article><span>2</span><div><h3>Steal their letters</h3><p>Use a rival’s letter in your word and it changes to your color.</p></div></article>
         <article><span>3</span><div><h3>Build a stronghold</h3><p>Surround a letter with your color to lock it. Locked letters can’t be stolen.</p></div></article>
-        <article><span>4</span><div><h3>Surround the bullseye</h3><p>The board has 31 tiles, so there’s always a winner — no ties. The center tile is marked with a dotted ring: own it and lock it by surrounding it with your own letters, and you get an extra turn.</p></div></article>
+        <article><span>4</span><div><h3>Fill the board</h3><p>The game ends the instant all 31 tiles are claimed — there’s no empty space left to play. Whoever owns the most tiles at that point wins, so there’s always a winner and never a tie.</p></div></article>
+        <article><span>5</span><div><h3>Surround the bullseye</h3><p>The center tile is marked with a dotted ring: own it and lock it by surrounding it with your own letters, and you get an extra turn.</p></div></article>
       </div>
       <button className="primary" onClick={() => newGame("relaxed")}>Play a relaxed game</button>
     </main>{tutorialModal}{accountModal}</>
@@ -1595,7 +1636,7 @@ export default function Home() {
         <div className="wordmark">{mode === "daily" ? "ENCIRCLE DAILY" : "ENCIRCLE"}</div>
         <div className="topbar-actions">
           <button className="account-chip" onClick={() => setAccountOpen(true)} type="button">{account ? "Stats" : "Save"}</button>
-          <button className="icon-button restart" onClick={() => newGame()} aria-label="New game">↻</button>
+          <button className="icon-button restart" onClick={resetBoard} aria-label="Reset board">↻</button>
         </div>
       </header>
 
