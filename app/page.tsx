@@ -1023,41 +1023,14 @@ function TutorialScore({ after, before }: { after: [number, number]; before: [nu
   );
 }
 
-// A believable finished-board split for the "objective" tutorial slide: a jagged, organically-grown
-// 16-15 territory boundary (like a real close game) rather than a perfect ring or wedge, so it doesn't
-// look like there's a shape/pattern to aim for.
-const GOAL_DEMO_OWN = new Set([0, 1, 2, 3, 7, 8, 10, 11, 14, 17, 18, 19, 21, 22, 23, 27]);
-// The tiles the closing word "ENCIRCLED" lands on for the demo — all within GOAL_DEMO_OWN, so the
-// last move shown is consistent with the side that ends up owning them.
-const GOAL_DEMO_WORD = "ENCIRCLED";
-const GOAL_DEMO_SELECTED = [3, 7, 8, 10, 11, 17, 18, 19, 21];
-
 function TutorialDemo({ kind }: { kind: typeof TUTORIAL_SLIDES[number]["kind"] }) {
-  if (kind === "goal") {
-    const letters = demoLetters(GOAL_DEMO_WORD, GOAL_DEMO_SELECTED);
-    return (
+  if (kind === "goal") return (
     <div className="goal-demo" aria-hidden="true">
-      <div className="tutorial-wordline"><span>Last word</span><strong>{GOAL_DEMO_WORD}</strong></div>
-      <div className="tutorial-board">
-        <svg className="tutorial-board-svg" viewBox="0 0 100 100">
-          {BOARD_LAYOUT.map((layout, i) => {
-            const [tx, ty] = polarPoint(layout.ring === 0 ? 0 : (layout.rIn + layout.rOut) / 2, (layout.a0 + layout.a1) / 2);
-            return (
-              <g className={`${layout.ring === 0 ? "ring-0 " : ""}${GOAL_DEMO_OWN.has(i) ? "demo-own" : "demo-rival"}`} key={i}>
-                {layout.ring === 0
-                  ? <circle className="tile-shape" cx={50} cy={50} r={layout.rOut} />
-                  : <path className="tile-shape" d={sectorPath(layout.rIn, layout.rOut, layout.a0, layout.a1)} />}
-                <text className="tile-letter" dy="0.32em" textAnchor="middle" x={tx} y={ty}>{letters[i]}</text>
-              </g>
-            );
-          })}
-        </svg>
-      </div>
+      <img className="goal-demo-board" src="/tutorial-goal-board.png" alt="A finished ENCIRCLE board with every tile claimed" />
       <div className="goal-demo-tally"><span>16 tiles</span><i>—</i><span>15 tiles</span></div>
       <p className="goal-demo-caption">Board full · game over</p>
     </div>
-    );
-  }
+  );
   if (kind === "words") return (
     <div className="word-power-demo" aria-hidden="true">
       <TutorialScore before={[4, 7]} after={[9, 5]} />
