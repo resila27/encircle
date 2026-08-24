@@ -1144,7 +1144,11 @@ export default function Home() {
   const [shareStatus, setShareStatus] = useState("");
   const [definition, setDefinition] = useState<{ word: string; text: string; loading: boolean; source?: string } | null>(null);
   const [claimEffect, setClaimEffect] = useState<{ tiles: number[]; stolen: number[]; locked: number[] }>({ tiles: [], stolen: [], locked: [] });
-  const [hapticsEnabled, setHapticsEnabled] = useState(() => typeof window === "undefined" || window.localStorage.getItem("gridlock-haptics") !== "off");
+  // No UI to toggle this anymore (removed — most players can't feel it and it was confusing dead
+  // weight in the menu), but it stays on by default and still fires on devices/browsers that
+  // actually support the vibrate API (mainly Android; iOS Safari doesn't implement it at all,
+  // which is why it never did anything on iPhone).
+  const [hapticsEnabled] = useState(() => typeof window === "undefined" || window.localStorage.getItem("gridlock-haptics") !== "off");
   const [tutorialOpen, setTutorialOpen] = useState(false);
   const [tutorialPage, setTutorialPage] = useState(0);
   const [archiveMonth, setArchiveMonth] = useState(() => monthKey(todayKey()));
@@ -1186,13 +1190,6 @@ export default function Home() {
       navigator.vibrate(newlyLocked.length ? [18, 30, 24] : stolen.length ? [15, 28, 15] : owner === 1 ? 16 : 8);
     }
   }, [hapticsEnabled]);
-
-  const toggleHaptics = () => {
-    const next = !hapticsEnabled;
-    setHapticsEnabled(next);
-    window.localStorage.setItem("gridlock-haptics", next ? "on" : "off");
-    if (next && "vibrate" in navigator) navigator.vibrate(12);
-  };
 
   const restoreGame = useCallback((game: SavedGame) => {
     if (game.boardVersion !== BOARD_VERSION || game.letters.length !== BOARD_SIZE || game.owners.length !== BOARD_SIZE) return;
@@ -1544,7 +1541,7 @@ export default function Home() {
         </div>
         <p className="eyebrow">A battle of words</p>
         <h1>ENCIRCLE</h1>
-        <p className="lede">Find words. Claim tiles.<br/>Surround letters to make them yours for good.</p>
+        <p className="lede">Find words. Claim tiles.<br/>Surround letters to make them yours&nbsp;for&nbsp;good.</p>
       </section>
       <button aria-label={dailyCompleted ? "View today’s daily challenge results" : "Play today’s daily challenge"} className="daily-feature" onClick={() => startDaily()} type="button">
         <span className="daily-preview-grid" aria-hidden="true">
@@ -1569,7 +1566,6 @@ export default function Home() {
         ))}
       </section>
       <button className="text-button" onClick={() => { setTutorialPage(0); setTutorialOpen(true); }}>How to play & strategy</button>
-      <button className="text-button haptics-toggle" aria-pressed={hapticsEnabled} onClick={toggleHaptics}>Vibration {hapticsEnabled ? "on" : "off"}</button>
       <a className="text-button haptics-toggle" href="mailto:hi@playencircle.com">Feedback? hi@playencircle.com</a>
       <p className="copyright">Copyright © 2026 Re Si La Games</p>
     </main>{tutorialModal}{accountModal}</>
