@@ -385,6 +385,23 @@ try {
         respond(['emails' => array_map(static fn ($row) => ['email' => $row['email'], 'optedInAt' => $row['marketing_opt_in_at']], $rows)]);
     }
 
+    // Every account that's ever signed in to save progress — not just the marketing opt-in subset
+    // above. Visit /api/index.php?action=export-users&token=... in a browser to use it.
+    if ($action === 'export-users') {
+        $config = app_config();
+        $expected = (string) ($config['admin_token'] ?? '');
+        $provided = (string) ($_GET['token'] ?? '');
+        if ($expected === '' || !hash_equals($expected, $provided)) respond(['error' => 'Not found.'], 404);
+        $rows = db()->query(
+            'SELECT email, created_at, marketing_opt_in FROM users ORDER BY created_at'
+        )->fetchAll();
+        respond(['users' => array_map(static fn ($row) => [
+            'email' => $row['email'],
+            'signedUpAt' => $row['created_at'],
+            'marketingOptIn' => (bool) ((int) $row['marketing_opt_in']),
+        ], $rows), 'count' => count($rows)]);
+    }
+
     if ($_SERVER['REQUEST_METHOD'] !== 'POST') respond(['error' => 'Method not allowed.'], 405);
 
     if ($action === 'validate-word') {
