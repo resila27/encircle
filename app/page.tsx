@@ -1148,6 +1148,7 @@ export default function Home() {
   const [accountReady, setAccountReady] = useState(false);
   const [dailyStanding, setDailyStanding] = useState<DailyStanding | null>(null);
   const [resultsOpen, setResultsOpen] = useState(false);
+  const [promoOpen, setPromoOpen] = useState(false);
   const [shareStatus, setShareStatus] = useState("");
   const [definition, setDefinition] = useState<{ word: string; text: string; loading: boolean; source?: string } | null>(null);
   const [claimEffect, setClaimEffect] = useState<{ tiles: number[]; stolen: number[]; locked: number[] }>({ tiles: [], stolen: [], locked: [] });
@@ -1251,6 +1252,29 @@ export default function Home() {
     }, 250);
     return () => window.clearTimeout(timer);
   }, [account, accountReady, dailyDate, difficulty, gameId, letters, message, mode, owners, played, result, screen, turn]);
+
+  // Cross-promo: once a Daily challenge is finished, point players at Typty — but only once per
+  // puzzle, so it doesn't nag anyone who revisits their finished board.
+  useEffect(() => {
+    if (mode !== "daily" || !resultsOpen || !dailyDate) return;
+    const promoSeenKey = `encircle-promo-seen-${dailyDate}`;
+    try {
+      if (window.localStorage.getItem(promoSeenKey) === "1") return;
+    } catch {
+      // If storage is unavailable, fall through and show the promo once for this session.
+    }
+    const timer = window.setTimeout(() => {
+      setPromoOpen(true);
+      try {
+        window.localStorage.setItem(promoSeenKey, "1");
+      } catch {
+        // Nothing else to do if storage isn't available.
+      }
+    }, 1100);
+    return () => window.clearTimeout(timer);
+  }, [dailyDate, mode, resultsOpen]);
+
+  const closePromo = () => setPromoOpen(false);
 
   const startWordDrag = (event: ReactPointerEvent<HTMLButtonElement>, tileId: number) => {
     if (event.pointerType === "mouse" && event.button !== 0) return;
@@ -1750,6 +1774,17 @@ export default function Home() {
           <button className="primary share-result" onClick={() => void shareResult()} type="button">{shareStatus || "Share result"}</button>
           <button className="secondary" onClick={() => mode === "daily" ? newGame(difficulty) : newGame()} type="button">Play another game</button>
           {!account && <button className="account-guest" onClick={() => setAccountOpen(true)} type="button">Sign in to save this result</button>}
+        </section>
+      </div>
+    )}
+    {promoOpen && (
+      <div className="modal-backdrop" onClick={closePromo}>
+        <section className="promo-modal" role="dialog" aria-modal="true" aria-labelledby="promo-title" onClick={(event) => event.stopPropagation()}>
+          <button className="modal-close" onClick={closePromo} type="button" aria-label="Close">×</button>
+          <img className="promo-card-image" src="/typty-social.png" alt="Typty — find today's four-letter word" />
+          <p className="eyebrow">From the same table</p>
+          <h2 id="promo-title">Like Encircle? Give our word-game Typty a try!</h2>
+          <a className="primary promo-cta" href="https://typty.com" target="_blank" rel="noopener noreferrer" onClick={closePromo}>Play Typty</a>
         </section>
       </div>
     )}
