@@ -359,6 +359,13 @@ function shiftMonth(value: string, amount: number) {
   return `${next.getFullYear()}-${String(next.getMonth() + 1).padStart(2, "0")}`;
 }
 
+// Display-only: turns the stored ISO "YYYY-MM-DD" daily key into "M-D-YYYY" wherever it's shown to
+// players. The ISO form stays the source of truth everywhere else (sorting, storage keys, etc.).
+function formatDailyDate(date: string) {
+  const [year, month, day] = date.split("-").map(Number);
+  return `${month}-${day}-${year}`;
+}
+
 function calendarDays(value: string) {
   const [year, month] = value.split("-").map(Number);
   const firstWeekday = new Date(year, month - 1, 1).getDay();
@@ -1481,7 +1488,7 @@ export default function Home() {
   };
 
   const shareResult = async () => {
-    const heading = mode === "daily" && dailyDate ? `ENCIRCLE Daily ${dailyDate}` : `ENCIRCLE vs ${LABELS[difficulty].name}`;
+    const heading = mode === "daily" && dailyDate ? `ENCIRCLE Daily ${formatDailyDate(dailyDate)}` : `ENCIRCLE vs ${LABELS[difficulty].name}`;
     const margin = Math.abs(yourScore - rivalScore);
     const resultLine = `${yourScore}–${rivalScore} ${result === "win" ? `Win (by ${margin})` : result === "loss" ? `Loss (by ${margin})` : "Tie"}`;
     const standingLine = mode === "daily" && dailyStanding ? `Rank #${dailyStanding.rank} · Top ${dailyStanding.percentile}% today\n` : "";
@@ -1719,7 +1726,7 @@ export default function Home() {
       <div className="modal-backdrop results-backdrop">
         <section className="results-modal" role="dialog" aria-modal="true" aria-labelledby="results-title">
           <button className="modal-close" onClick={() => setResultsOpen(false)} type="button" aria-label="Close">×</button>
-          <p className="eyebrow">{mode === "daily" ? `Encircle Daily · ${dailyDate}` : `Against ${LABELS[difficulty].name}`}</p>
+          <p className="eyebrow">{mode === "daily" ? `Encircle Daily · ${dailyDate ? formatDailyDate(dailyDate) : ""}` : `Against ${LABELS[difficulty].name}`}</p>
           <h2 id="results-title">{result === "win" ? "Tiles claimed!" : result === "loss" ? "The rival held on." : "Deadlocked."}</h2>
           <div className="final-score"><strong>{yourScore}</strong><span>–</span><strong>{rivalScore}</strong></div>
           <div className="result-highlights">
