@@ -1481,15 +1481,11 @@ export default function Home() {
   };
 
   const shareResult = async () => {
-    let ringOffset = 0;
-    const circles = BOARD_RING_COUNTS.map(count => {
-      const ring = owners.slice(ringOffset, ringOffset + count)
-        .map(owner => owner === 1 ? "🟢" : owner === 2 ? "🟡" : "⚪").join("");
-      ringOffset += count;
-      return ring;
-    }).join("\n");
     const heading = mode === "daily" && dailyDate ? `ENCIRCLE Daily ${dailyDate}` : `ENCIRCLE vs ${LABELS[difficulty].name}`;
-    const text = `${heading}\n${yourScore}–${rivalScore} ${result === "win" ? "Win" : result === "loss" ? "Loss" : "Tie"}\n${circles}\n${longestWord ? `Your best word: ${longestWord.toUpperCase()}\n` : ""}https://playencircle.com`;
+    const margin = Math.abs(yourScore - rivalScore);
+    const resultLine = `${yourScore}–${rivalScore} ${result === "win" ? `Win (by ${margin})` : result === "loss" ? `Loss (by ${margin})` : "Tie"}`;
+    const standingLine = mode === "daily" && dailyStanding ? `Rank #${dailyStanding.rank} · Top ${dailyStanding.percentile}% today\n` : "";
+    const text = `${heading}\n${resultLine}\n${standingLine}https://playencircle.com`;
     const canShare = typeof navigator.share === "function";
     try {
       if (canShare) await navigator.share({ text, title: "My ENCIRCLE result" });
