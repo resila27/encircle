@@ -1729,7 +1729,19 @@ export default function Home() {
           <div className="result-highlights">
             <div><span>Your best word</span><button ref={bestWordFit.ref} style={{ fontSize: bestWordFit.fontSize }} title={longestWord.toUpperCase()} type="button" onClick={() => longestWord && void lookUpWord(longestWord)}>{longestWord ? longestWord.toUpperCase() : "—"}</button></div>
             <div><span>Biggest steal</span><strong>{biggestSteal}</strong></div>
-            {mode === "daily" && <div><span>Daily standing</span>{dailyStanding ? <strong>{`#${dailyStanding.rank} of ${dailyStanding.total}`}</strong> : account ? <strong>Calculating…</strong> : <button className="daily-standing-signin" onClick={() => setAccountOpen(true)} type="button">Sign in</button>}</div>}
+            {mode === "daily" && (
+              <div>
+                <span>Daily standing</span>
+                {dailyStanding ? (
+                  <>
+                    <strong>{`#${dailyStanding.rank}`}</strong>
+                    <small className="daily-margin">
+                      {yourScore > rivalScore ? `Won by ${yourScore - rivalScore}` : yourScore < rivalScore ? `Lost by ${rivalScore - yourScore}` : "Tied"}
+                    </small>
+                  </>
+                ) : account ? <strong>Calculating…</strong> : <button className="daily-standing-signin" onClick={() => setAccountOpen(true)} type="button">Sign in</button>}
+              </div>
+            )}
           </div>
           {dailyStanding && <p className="percentile">Top {dailyStanding.percentile}% today</p>}
           <button className="primary share-result" onClick={() => void shareResult()} type="button">{shareStatus || "Share result"}</button>
