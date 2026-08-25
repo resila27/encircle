@@ -1739,7 +1739,7 @@ export default function Home() {
                   <>
                     <strong>{`#${dailyStanding.rank}`}</strong>
                     <small className="daily-margin">
-                      {yourScore > rivalScore ? `Won by ${yourScore - rivalScore}` : yourScore < rivalScore ? `Lost by ${rivalScore - yourScore}` : "Tied"}
+                      {yourScore > rivalScore ? `Won by ${yourScore - rivalScore} tiles!` : yourScore < rivalScore ? `Lost by ${rivalScore - yourScore} tiles` : "Tied"}
                     </small>
                   </>
                 ) : account ? <strong>Calculating…</strong> : <button className="daily-standing-signin" onClick={() => setAccountOpen(true)} type="button">Sign in</button>}
