@@ -1781,7 +1781,7 @@ export default function Home() {
       <div className="modal-backdrop" onClick={closePromo}>
         <section className="promo-modal" role="dialog" aria-modal="true" aria-labelledby="promo-title" onClick={(event) => event.stopPropagation()}>
           <button className="modal-close" onClick={closePromo} type="button" aria-label="Close">×</button>
-          <img className="promo-card-image" src="/fivefold-social.png" alt="FiveFold — five clues, four to eight letters, a new word climb every day" />
+          <img className="promo-card-image" src="/fivefold-social.svg" alt="FiveFold — five clues, four to eight letters, a new word climb every day" />
           <p className="eyebrow">From the same table</p>
           <h2 id="promo-title">Five clues. A little longer each time.</h2>
           <a className="primary promo-cta" href="https://play5fold.com/" target="_blank" rel="noopener noreferrer" onClick={closePromo}>Play FiveFold</a>
